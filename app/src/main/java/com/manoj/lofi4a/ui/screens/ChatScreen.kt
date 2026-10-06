@@ -66,7 +66,8 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
             context.contentResolver.openInputStream(uri)?.use { i ->
                 f.outputStream().use { o -> i.copyTo(o) }
             }
-            vm.describeImage(f.absolutePath)
+            vm.describeImage(f.absolutePath, input)
+            input = ""
         }
     }
 
@@ -106,7 +107,7 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
                     )
                 ) {
                     Text(
-                        "Text model not loaded. Open Models to download and load it.",
+                        "Text model not loaded. It loads automatically when you send a message (download it first in Models).",
                         modifier = Modifier.padding(12.dp),
                         style = MaterialTheme.typography.bodyMedium
                     )
@@ -132,33 +133,31 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
                 ) {
                     Text("🖼️", style = MaterialTheme.typography.titleLarge)
                 }
-                IconButton(onClick = {
-                    if (recording) {
-                        recorder?.stop()
-                        recorder = null
-                        recording = false
-                        vm.transcribe(audioFile.absolutePath) { text ->
-                            input = (input + " " + text).trim()
+                IconButton(
+                    onClick = {
+                        if (recording) {
+                            recorder?.stop()
+                            recording = false
+                            vm.transcribe(audioFile.absolutePath) { input = it }
+                        } else if (ContextCompat.checkSelfPermission(
+                                context, Manifest.permission.RECORD_AUDIO
+                            ) == PackageManager.PERMISSION_GRANTED
+                        ) {
+                            startRecording()
+                        } else {
+                            micPermission.launch(Manifest.permission.RECORD_AUDIO)
                         }
-                    } else {
-                        val granted = ContextCompat.checkSelfPermission(
-                            context, Manifest.permission.RECORD_AUDIO
-                        ) == PackageManager.PERMISSION_GRANTED
-                        if (granted) startRecording()
-                        else micPermission.launch(Manifest.permission.RECORD_AUDIO)
-                    }
-                }) {
-                    Text(
-                        if (recording) "⏹️" else "🎤",
-                        style = MaterialTheme.typography.titleLarge
-                    )
+                    },
+                    enabled = !generating
+                ) {
+                    Text(if (recording) "⏹️" else "🎤", style = MaterialTheme.typography.titleLarge)
                 }
                 OutlinedTextField(
                     value = input,
                     onValueChange = { input = it },
                     modifier = Modifier.weight(1f),
                     placeholder = { Text("Message LoFi-4A...") },
-                    enabled = textModelLoaded && !generating
+                    enabled = !generating
                 )
                 Spacer(Modifier.width(8.dp))
                 IconButton(
@@ -167,7 +166,7 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
                         input = ""
                         vm.send(prompt)
                     },
-                    enabled = textModelLoaded && !generating && input.isNotBlank()
+                    enabled = !generating && input.isNotBlank()
                 ) {
                     if (generating) {
                         CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
