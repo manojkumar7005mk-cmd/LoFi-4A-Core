@@ -1,5 +1,9 @@
 package com.manoj.lofi4a.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -12,11 +16,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.manoj.lofi4a.core.WavRecorder
 import com.manoj.lofi4a.ui.Routes
 import com.manoj.lofi4a.ui.chat.ChatMessage
 import com.manoj.lofi4a.ui.chat.ChatViewModel
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -27,6 +35,40 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
     val textModelLoaded by vm.textModelLoaded.collectAsState()
     var input by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+
+    val context = LocalContext.current
+    var recording by remember { mutableStateOf(false) }
+    var recorder by remember { mutableStateOf<WavRecorder?>(null) }
+    val audioFile = remember { File(context.cacheDir, "mic.wav") }
+
+    val startRecording: () -> Unit = {
+        try {
+            val r = WavRecorder(audioFile)
+            r.start()
+            recorder = r
+            recording = true
+        } catch (e: Exception) {
+            recording = false
+        }
+    }
+
+    val micPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) startRecording()
+    }
+
+    val imagePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            val f = File(context.cacheDir, "picked_image")
+            context.contentResolver.openInputStream(uri)?.use { i ->
+                f.outputStream().use { o -> i.copyTo(o) }
+            }
+            vm.describeImage(f.absolutePath)
+        }
+    }
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
@@ -84,6 +126,33 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
                 modifier = Modifier.fillMaxWidth().padding(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                IconButton(
+                    onClick = { imagePicker.launch("image/*") },
+                    enabled = !generating
+                ) {
+                    Text("🖼️", style = MaterialTheme.typography.titleLarge)
+                }
+                IconButton(onClick = {
+                    if (recording) {
+                        recorder?.stop()
+                        recorder = null
+                        recording = false
+                        vm.transcribe(audioFile.absolutePath) { text ->
+                            input = (input + " " + text).trim()
+                        }
+                    } else {
+                        val granted = ContextCompat.checkSelfPermission(
+                            context, Manifest.permission.RECORD_AUDIO
+                        ) == PackageManager.PERMISSION_GRANTED
+                        if (granted) startRecording()
+                        else micPermission.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                }) {
+                    Text(
+                        if (recording) "⏹️" else "🎤",
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                }
                 OutlinedTextField(
                     value = input,
                     onValueChange = { input = it },
