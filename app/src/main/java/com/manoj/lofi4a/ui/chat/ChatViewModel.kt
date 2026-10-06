@@ -57,15 +57,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun describeImage(imagePath: String) {
-        addMessage("🖼️ Image attached", isUser = true)
+    /** LFM2.5-VL looks at the image, then Gemma answers using that description. */
+    fun describeImage(imagePath: String, question: String = "") {
+        addMessage(if (question.isBlank()) "🖼️ Image attached" else "🖼️ $question", isUser = true)
         _generating.value = true
         viewModelScope.launch(Dispatchers.Default) {
             try {
-                addMessage(
-                    modelManager.describeImage(imagePath, "Describe this image."),
-                    isUser = false
-                )
+                val r = modelManager.analyzeImage(imagePath, question)
+                addMessage("👁️ LFM saw: ${r.seen}", isUser = false)
+                addMessage(r.answer, isUser = false)
             } catch (e: Exception) {
                 addMessage("Error: ${e.message}", isUser = false)
             } finally {
