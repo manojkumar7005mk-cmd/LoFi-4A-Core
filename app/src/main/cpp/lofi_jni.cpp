@@ -1,137 +1,235 @@
 #include <jni.h>
-#include <string>
 #include <android/log.h>
+#include <algorithm>
+#include <mutex>
+#include <string>
+#include <vector>
+#include "llama.h"
+#include "mtmd.h"
+#include "mtmd-helper.h"
 
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "LoFi-JNI", __VA_ARGS__)
+#define TAG "LoFi-JNI"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
+
+namespace {
+constexpr int N_CTX = 4096;
+constexpr int N_BATCH = 512;
+constexpr int N_THREADS = 4;
+
+struct TextCtx { llama_model* model; llama_context* lctx; };
+struct VisionCtx { llama_model* model; llama_context* lctx; mtmd_context* mctx; };
+
+std::once_flag g_init;
+void init_backend() { std::call_once(g_init, [] { llama_backend_init(); }); }
+
+std::string to_std(JNIEnv* env, jstring s) {
+    jclass sc = env->FindClass("java/lang/String");
+    jmethodID gb = env->GetMethodID(sc, "getBytes", "(Ljava/lang/String;)[B");
+    jstring enc = env->NewStringUTF("UTF-8");
+    auto arr = (jbyteArray) env->CallObjectMethod(s, gb, enc);
+    jsize n = env->GetArrayLength(arr);
+    std::string r((size_t) n, '\0');
+    if (n > 0) env->GetByteArrayRegion(arr, 0, n, (jbyte*) &r[0]);
+    env->DeleteLocalRef(arr); env->DeleteLocalRef(enc); env->DeleteLocalRef(sc);
+    return r;
+}
+
+jstring to_jstring(JNIEnv* env, const std::string& s) {
+    jclass sc = env->FindClass("java/lang/String");
+    jmethodID ctor = env->GetMethodID(sc, "<init>", "([BLjava/lang/String;)V");
+    jbyteArray arr = env->NewByteArray((jsize) s.size());
+    if (!s.empty()) env->SetByteArrayRegion(arr, 0, (jsize) s.size(), (const jbyte*) s.data());
+    jstring enc = env->NewStringUTF("UTF-8");
+    auto r = (jstring) env->NewObject(sc, ctor, arr, enc);
+    env->DeleteLocalRef(arr); env->DeleteLocalRef(enc); env->DeleteLocalRef(sc);
+    return r;
+}
+
+void fail(JNIEnv* env, const std::string& msg) {
+    LOGE("%s", msg.c_str());
+    jclass c = env->FindClass("java/lang/RuntimeException");
+    env->ThrowNew(c, msg.c_str());
+}
+
+llama_model* load_model(const std::string& path) {
+    init_backend();
+    llama_model_params mp = llama_model_default_params();
+    mp.n_gpu_layers = 0;
+    return llama_model_load_from_file(path.c_str(), mp);
+}
+
+llama_context* new_context(llama_model* model) {
+    llama_context_params cp = llama_context_default_params();
+    cp.n_ctx = N_CTX;
+    cp.n_batch = N_BATCH;
+    cp.n_ubatch = N_BATCH;
+    cp.n_threads = N_THREADS;
+    cp.n_threads_batch = N_THREADS;
+    return llama_init_from_model(model, cp);
+}
+
+std::vector<llama_token> tokenize(const llama_vocab* v, const std::string& t) {
+    int n = -llama_tokenize(v, t.c_str(), (int32_t) t.size(), nullptr, 0, true, true);
+    std::vector<llama_token> r(n > 0 ? n : 0);
+    if (n <= 0 || llama_tokenize(v, t.c_str(), (int32_t) t.size(), r.data(), (int32_t) r.size(), true, true) < 0)
+        r.clear();
+    return r;
+}
+
+bool decode_all(llama_context* lctx, std::vector<llama_token>& toks) {
+    for (size_t i = 0; i < toks.size(); i += N_BATCH) {
+        int n = (int) std::min<size_t>(N_BATCH, toks.size() - i);
+        if (llama_decode(lctx, llama_batch_get_one(toks.data() + i, n)) != 0) return false;
+    }
+    return true;
+}
+
+// Samples after the prompt has already been decoded.
+std::string sample_loop(llama_context* lctx, const llama_vocab* vocab, int maxTokens) {
+    llama_sampler* smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
+    llama_sampler_chain_add(smpl, llama_sampler_init_top_k(40));
+    llama_sampler_chain_add(smpl, llama_sampler_init_top_p(0.9f, 1));
+    llama_sampler_chain_add(smpl, llama_sampler_init_temp(0.7f));
+    llama_sampler_chain_add(smpl, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+    std::string out;
+    for (int i = 0; i < maxTokens; i++) {
+        llama_token tok = llama_sampler_sample(smpl, lctx, -1);
+        if (llama_vocab_is_eog(vocab, tok)) break;
+        char buf[256];
+        int n = llama_token_to_piece(vocab, tok, buf, sizeof(buf), 0, false);
+        if (n > 0) out.append(buf, (size_t) n);
+        if (llama_decode(lctx, llama_batch_get_one(&tok, 1)) != 0) break;
+    }
+    llama_sampler_free(smpl);
+    return out;
+}
+} // namespace
 
 extern "C" {
-
-// Opaque handle so the Kotlin side keeps a stable jlong.
-struct LofiCtx {
-    int kind; // 1=text, 2=vision, 3=speech
-    std::string path;
-};
 
 // ---------------- Text (llama.cpp) ----------------
 
 JNIEXPORT jlong JNICALL
-Java_com_manoj_lofi4a_core_NativeBridge_loadTextModel(
-        JNIEnv* env, jobject /*thiz*/, jstring path) {
-    const char* p = env->GetStringUTFChars(path, nullptr);
-    __android_log_print(ANDROID_LOG_INFO, "LoFi-JNI", "loadTextModel: %s", p);
-    auto* ctx = new LofiCtx{1, p};
-    env->ReleaseStringUTFChars(path, p);
-    // TODO: llama_model_load_from_file() + llama_init_from_model() here.
-    return reinterpret_cast<jlong>(ctx);
+Java_com_manoj_lofi4a_core_NativeBridge_loadTextModel(JNIEnv* env, jobject, jstring path) {
+    std::string p = to_std(env, path);
+    LOGI("loadTextModel: %s", p.c_str());
+    llama_model* model = load_model(p);
+    if (!model) { fail(env, "Could not load text model (file missing or unsupported)."); return 0; }
+    llama_context* lctx = new_context(model);
+    if (!lctx) { llama_model_free(model); fail(env, "Could not create text context (out of memory?)."); return 0; }
+    return reinterpret_cast<jlong>(new TextCtx{model, lctx});
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_manoj_lofi4a_core_NativeBridge_generate(
-        JNIEnv* env, jobject /*thiz*/, jlong ctxPtr, jstring prompt, jint maxTokens) {
-    auto* ctx = reinterpret_cast<LofiCtx*>(ctxPtr);
-    if (ctx == nullptr || ctx->kind != 1) {
-        LOGE("generate: invalid text context");
-        return env->NewStringUTF("");
-    }
-    const char* pr = env->GetStringUTFChars(prompt, nullptr);
-    std::string out = "[stub] llama.cpp would generate for prompt: ";
-    out += pr;
-    env->ReleaseStringUTFChars(prompt, pr);
-    (void)maxTokens;
-    // TODO: real llama_tokenize / llama_decode loop.
-    return env->NewStringUTF(out.c_str());
+Java_com_manoj_lofi4a_core_NativeBridge_generate(JNIEnv* env, jobject, jlong ptr, jstring prompt, jint maxTokens) {
+    auto* c = reinterpret_cast<TextCtx*>(ptr);
+    if (!c) { fail(env, "Text model is not loaded."); return nullptr; }
+    const llama_vocab* vocab = llama_model_get_vocab(c->model);
+    std::vector<llama_token> toks = tokenize(vocab, to_std(env, prompt));
+    if (toks.empty()) { fail(env, "Could not tokenize prompt."); return nullptr; }
+    if ((int) toks.size() + maxTokens > N_CTX) { fail(env, "Prompt is too long."); return nullptr; }
+    llama_memory_clear(llama_get_memory(c->lctx), true);
+    if (!decode_all(c->lctx, toks)) { fail(env, "Text model failed to read the prompt."); return nullptr; }
+    return to_jstring(env, sample_loop(c->lctx, vocab, maxTokens));
 }
 
 JNIEXPORT void JNICALL
-Java_com_manoj_lofi4a_core_NativeBridge_unloadTextModel(
-        JNIEnv*, jobject, jlong ctxPtr) {
-    auto* ctx = reinterpret_cast<LofiCtx*>(ctxPtr);
-    if (ctx == nullptr) return;
-    // TODO: llama_free(ctx); llama_model_free(model);
-    delete ctx;
+Java_com_manoj_lofi4a_core_NativeBridge_unloadTextModel(JNIEnv*, jobject, jlong ptr) {
+    auto* c = reinterpret_cast<TextCtx*>(ptr);
+    if (!c) return;
+    llama_free(c->lctx);
+    llama_model_free(c->model);
+    delete c;
 }
 
-// ---------------- Vision (llama.cpp mtmd) ----------------
+// ---------------- Vision (LFM2.5-VL via mtmd) ----------------
 
 JNIEXPORT jlong JNICALL
-Java_com_manoj_lofi4a_core_NativeBridge_loadVisionModel(
-        JNIEnv* env, jobject, jstring modelPath, jstring mmprojPath) {
-    const char* m = env->GetStringUTFChars(modelPath, nullptr);
-    const char* mm = env->GetStringUTFChars(mmprojPath, nullptr);
-    __android_log_print(ANDROID_LOG_INFO, "LoFi-JNI",
-                        "loadVisionModel: %s + %s", m, mm);
-    auto* ctx = new LofiCtx{2, m};
-    env->ReleaseStringUTFChars(modelPath, m);
-    env->ReleaseStringUTFChars(mmprojPath, mm);
-    // TODO: mtmd_init_from_file() here.
-    return reinterpret_cast<jlong>(ctx);
+Java_com_manoj_lofi4a_core_NativeBridge_loadVisionModel(JNIEnv* env, jobject, jstring modelPath, jstring mmprojPath) {
+    std::string m = to_std(env, modelPath), mm = to_std(env, mmprojPath);
+    LOGI("loadVisionModel: %s + %s", m.c_str(), mm.c_str());
+    llama_model* model = load_model(m);
+    if (!model) { fail(env, "Could not load vision model."); return 0; }
+    llama_context* lctx = new_context(model);
+    if (!lctx) { llama_model_free(model); fail(env, "Could not create vision context."); return 0; }
+    mtmd_context_params mp = mtmd_context_params_default();
+    mp.use_gpu = false;
+    mp.n_threads = N_THREADS;
+    mtmd_context* mctx = mtmd_init_from_file(mm.c_str(), model, mp);
+    if (!mctx) {
+        llama_free(lctx); llama_model_free(model);
+        fail(env, "Could not load the vision projector (mmproj) file.");
+        return 0;
+    }
+    return reinterpret_cast<jlong>(new VisionCtx{model, lctx, mctx});
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_manoj_lofi4a_core_NativeBridge_describeImage(
-        JNIEnv* env, jobject, jlong ctxPtr, jstring imagePath, jstring prompt) {
-    auto* ctx = reinterpret_cast<LofiCtx*>(ctxPtr);
-    if (ctx == nullptr || ctx->kind != 2) {
-        LOGE("describeImage: invalid vision context");
-        return env->NewStringUTF("");
+Java_com_manoj_lofi4a_core_NativeBridge_describeImage(JNIEnv* env, jobject, jlong ptr, jstring imagePath, jstring prompt) {
+    auto* c = reinterpret_cast<VisionCtx*>(ptr);
+    if (!c) { fail(env, "Vision model is not loaded."); return nullptr; }
+    std::string img = to_std(env, imagePath), pr = to_std(env, prompt);
+
+    mtmd_bitmap* bmp = mtmd_helper_bitmap_init_from_file(c->mctx, img.c_str());
+    if (!bmp) { fail(env, "Could not read the image file."); return nullptr; }
+
+    // LFM2 chat format (ChatML-style). BOS is added by the tokenizer.
+    std::string full = "<|im_start|>user\n" + std::string(mtmd_default_marker()) + "\n" + pr +
+                       "<|im_end|>\n<|im_start|>assistant\n";
+    mtmd_input_text txt;
+    txt.text = full.c_str();
+    txt.add_special = true;
+    txt.parse_special = true;
+
+    mtmd_input_chunks* chunks = mtmd_input_chunks_init();
+    const mtmd_bitmap* bitmaps[1] = {bmp};
+    int32_t r = mtmd_tokenize(c->mctx, chunks, &txt, bitmaps, 1);
+    if (r != 0) {
+        mtmd_input_chunks_free(chunks); mtmd_bitmap_free(bmp);
+        fail(env, "Could not process the image (tokenize error " + std::to_string(r) + ").");
+        return nullptr;
     }
-    env->GetStringUTFChars(imagePath, nullptr);
-    env->ReleaseStringUTFChars(imagePath, env->GetStringUTFChars(imagePath, nullptr));
-    const char* pr = env->GetStringUTFChars(prompt, nullptr);
-    std::string out = "[stub] mtmd would describe image. Prompt: ";
-    out += pr;
-    env->ReleaseStringUTFChars(prompt, pr);
-    return env->NewStringUTF(out.c_str());
+
+    llama_memory_clear(llama_get_memory(c->lctx), true);
+    llama_pos n_past = 0;
+    r = mtmd_helper_eval_chunks(c->mctx, c->lctx, chunks, 0, 0, N_BATCH, true, &n_past);
+    mtmd_input_chunks_free(chunks);
+    mtmd_bitmap_free(bmp);
+    if (r != 0) { fail(env, "Vision model failed to read the image (error " + std::to_string(r) + ")."); return nullptr; }
+
+    const llama_vocab* vocab = llama_model_get_vocab(c->model);
+    return to_jstring(env, sample_loop(c->lctx, vocab, 300));
 }
 
 JNIEXPORT void JNICALL
-Java_com_manoj_lofi4a_core_NativeBridge_unloadVisionModel(JNIEnv*, jobject, jlong ctxPtr) {
-    auto* ctx = reinterpret_cast<LofiCtx*>(ctxPtr);
-    if (ctx == nullptr) return;
-    // TODO: mtmd_free(ctx);
-    delete ctx;
+Java_com_manoj_lofi4a_core_NativeBridge_unloadVisionModel(JNIEnv*, jobject, jlong ptr) {
+    auto* c = reinterpret_cast<VisionCtx*>(ptr);
+    if (!c) return;
+    mtmd_free(c->mctx);
+    llama_free(c->lctx);
+    llama_model_free(c->model);
+    delete c;
 }
 
-// ---------------- Speech (whisper.cpp) ----------------
+// ---------------- Speech (not built yet) ----------------
 
 JNIEXPORT jlong JNICALL
-Java_com_manoj_lofi4a_core_NativeBridge_loadSpeechModel(
-        JNIEnv* env, jobject, jstring path) {
-    const char* p = env->GetStringUTFChars(path, nullptr);
-    __android_log_print(ANDROID_LOG_INFO, "LoFi-JNI", "loadSpeechModel: %s", p);
-    auto* ctx = new LofiCtx{3, p};
-    env->ReleaseStringUTFChars(path, p);
-    // TODO: whisper_init_from_file_with_params() here.
-    return reinterpret_cast<jlong>(ctx);
+Java_com_manoj_lofi4a_core_NativeBridge_loadSpeechModel(JNIEnv* env, jobject, jstring) {
+    fail(env, "Voice (Whisper) is not built into this version yet.");
+    return 0;
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_manoj_lofi4a_core_NativeBridge_transcribe(
-        JNIEnv* env, jobject, jlong ctxPtr, jstring wavPath) {
-    auto* ctx = reinterpret_cast<LofiCtx*>(ctxPtr);
-    if (ctx == nullptr || ctx->kind != 3) {
-        LOGE("transcribe: invalid speech context");
-        return env->NewStringUTF("");
-    }
-    const char* w = env->GetStringUTFChars(wavPath, nullptr);
-    __android_log_print(ANDROID_LOG_INFO, "LoFi-JNI", "transcribe: %s", w);
-    env->ReleaseStringUTFChars(wavPath, w);
-    // TODO: whisper_full() here.
-    return env->NewStringUTF("[stub] whisper.cpp would transcribe audio");
+Java_com_manoj_lofi4a_core_NativeBridge_transcribe(JNIEnv* env, jobject, jlong, jstring) {
+    fail(env, "Voice (Whisper) is not built into this version yet.");
+    return nullptr;
 }
 
 JNIEXPORT void JNICALL
-Java_com_manoj_lofi4a_core_NativeBridge_unloadSpeechModel(JNIEnv*, jobject, jlong ctxPtr) {
-    auto* ctx = reinterpret_cast<LofiCtx*>(ctxPtr);
-    if (ctx == nullptr) return;
-    // TODO: whisper_free(ctx);
-    delete ctx;
-}
+Java_com_manoj_lofi4a_core_NativeBridge_unloadSpeechModel(JNIEnv*, jobject, jlong) {}
 
 JNIEXPORT void JNICALL
-Java_com_manoj_lofi4a_core_NativeBridge_freeAll(JNIEnv*, jobject) {
-    // TODO: free any lingering ggml/llama/whisper allocations.
-    __android_log_print(ANDROID_LOG_INFO, "LoFi-JNI", "freeAll");
-}
+Java_com_manoj_lofi4a_core_NativeBridge_freeAll(JNIEnv*, jobject) { LOGI("freeAll"); }
 
 } // extern "C"
