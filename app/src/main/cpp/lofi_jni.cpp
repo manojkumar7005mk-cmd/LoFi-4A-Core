@@ -21,7 +21,22 @@ struct TextCtx { llama_model* model; llama_context* lctx; };
 struct VisionCtx { llama_model* model; llama_context* lctx; mtmd_context* mctx; };
 
 std::once_flag g_init;
-void init_backend() { std::call_once(g_init, [] { llama_backend_init(); }); }
+std::string g_last_log;
+void log_cb(enum ggml_log_level level, const char* text, void*) {
+    if (!text) return;
+    if (level >= GGML_LOG_LEVEL_WARN) {
+        g_last_log += text;
+        if (g_last_log.size() > 300) g_last_log = g_last_log.substr(g_last_log.size() - 300);
+    }
+    __android_log_print(ANDROID_LOG_INFO, "LoFi-llama", "%s", text);
+}
+void init_backend() {
+    std::call_once(g_init, [] {
+        llama_log_set(log_cb, nullptr);
+        mtmd_helper_log_set(log_cb, nullptr);
+        llama_backend_init();
+    });
+}
 
 std::string to_std(JNIEnv* env, jstring s) {
     jclass sc = env->FindClass("java/lang/String");
