@@ -1,3 +1,4 @@
+
 #include <jni.h>
 #include <android/log.h>
 #include <algorithm>
@@ -22,6 +23,7 @@ struct VisionCtx { llama_model* model; llama_context* lctx; mtmd_context* mctx; 
 
 std::once_flag g_init;
 std::string g_last_log;
+
 void log_cb(enum ggml_log_level level, const char* text, void*) {
     if (!text) return;
     if (level >= GGML_LOG_LEVEL_WARN) {
@@ -30,6 +32,7 @@ void log_cb(enum ggml_log_level level, const char* text, void*) {
     }
     __android_log_print(ANDROID_LOG_INFO, "LoFi-llama", "%s", text);
 }
+
 void init_backend() {
     std::call_once(g_init, [] {
         llama_log_set(log_cb, nullptr);
@@ -186,7 +189,7 @@ Java_com_manoj_lofi4a_core_NativeBridge_describeImage(JNIEnv* env, jobject, jlon
     if (!c) { fail(env, "Vision model is not loaded."); return nullptr; }
     std::string img = to_std(env, imagePath), pr = to_std(env, prompt);
 
-   mtmd_helper_bitmap_wrapper wrap = mtmd_helper_bitmap_init_from_file(c->mctx, img.c_str(), false);
+    mtmd_helper_bitmap_wrapper wrap = mtmd_helper_bitmap_init_from_file(c->mctx, img.c_str(), false);
     mtmd_bitmap* bmp = wrap.bitmap;
     if (wrap.video_ctx) mtmd_helper_video_free(wrap.video_ctx);
     if (!bmp) { fail(env, "Could not read the image file."); return nullptr; }
@@ -201,10 +204,11 @@ Java_com_manoj_lofi4a_core_NativeBridge_describeImage(JNIEnv* env, jobject, jlon
 
     mtmd_input_chunks* chunks = mtmd_input_chunks_init();
     const mtmd_bitmap* bitmaps[1] = {bmp};
+    g_last_log.clear();
     int32_t r = mtmd_tokenize(c->mctx, chunks, &txt, bitmaps, 1);
     if (r != 0) {
         mtmd_input_chunks_free(chunks); mtmd_bitmap_free(bmp);
-        fail(env, "Could not process the image (tokenize error " + std::to_string(r) + ").");
+        fail(env, "Could not process the image (tokenize error " + std::to_string(r) + "). " + g_last_log);
         return nullptr;
     }
 
