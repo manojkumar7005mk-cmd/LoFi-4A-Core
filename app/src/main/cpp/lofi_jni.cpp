@@ -229,8 +229,6 @@ Java_com_manoj_lofi4a_core_NativeBridge_loadVisionModel(JNIEnv* env, jobject, js
     mtmd_context_params mp = mtmd_context_params_default();
     mp.use_gpu = false;
     mp.n_threads = N_THREADS;
-    mp.image_marker = nullptr;                 // switch off the legacy marker
-    mp.media_marker = mtmd_default_marker();
     mtmd_context* mctx = mtmd_init_from_file(mm.c_str(), model, mp);
     if (!mctx) {
         llama_free(lctx); llama_model_free(model);
@@ -252,13 +250,15 @@ Java_com_manoj_lofi4a_core_NativeBridge_describeImage(JNIEnv* env, jobject, jlon
     if (!bmp) { fail(env, "Could not read the image file."); return nullptr; }
 
     // LFM2 chat format (ChatML-style). BOS is added by the tokenizer.
-    // Try the current media marker first, then the older image marker.
+    // The media marker must be the one THIS context expects, so ask the context for it.
     mtmd_input_chunks* chunks = nullptr;
     const mtmd_bitmap* bitmaps[1] = {bmp};
     int32_t r = -1;
-    const char* markers[2] = { mtmd_default_marker(), "<__image__>" };
+    const char* ctx_marker = mtmd_get_marker(c->mctx);
+    const char* markers[2] = { ctx_marker, mtmd_default_marker() };
     g_last_log.clear();
     for (const char* marker : markers) {
+        if (!marker) continue;
         std::string full = "<|im_start|>user\n" + std::string(marker) + "\n" + pr +
                            "<|im_end|>\n<|im_start|>assistant\n";
         mtmd_input_text txt;
