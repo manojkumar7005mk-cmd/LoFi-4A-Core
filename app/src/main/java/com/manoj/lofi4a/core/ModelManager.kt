@@ -216,12 +216,13 @@ class ModelManager(private val context: Context) {
         }
     }
 
-    
-
     // ---------------- Inference (background threads) ----------------
 
     private val systemPrompt =
-        "You are LoFi-4A Core, the main AI assistant in the LoFi model family. Answer clearly and briefly."
+        "You are LoFi-4A Core, the main AI assistant in the LoFi model family. " +
+            "You run fully offline on the user's phone. " +
+            "If asked who made you, say you are part of the LoFi model family and do not name any company. " +
+            "Answer clearly and helpfully."
 
     private fun gemmaPrompt(user: String) =
         "<start_of_turn>user\n$systemPrompt\n\n$user<end_of_turn>\n<start_of_turn>model\n"
@@ -238,35 +239,46 @@ class ModelManager(private val context: Context) {
         load(def).getOrThrow()
     }
 
-    suspend fun generateText(prompt: String): String = withContext(Dispatchers.Default) {
-        ensureLoaded(ModelType.TEXT)
-        NativeBridge.generate(textCtx, gemmaPrompt(prompt), 256)
-    }
-
-    data class ImageResult(val seen: String, val answer: String)
-
-    /** LFM2.5-VL describes the image, then Gemma answers using that description. */
-    suspend fun analyzeImage(imagePath: String, question: String): ImageResult =
+    /** Streams Gemma's answer: onToken is called with each piece as it is generated. */
+    suspend fun generateTextStream(prompt: String, onToken: (String) -> Unit): String =
         withContext(Dispatchers.Default) {
-            ensureLoaded(ModelType.VISION)
-            val seen = NativeBridge.describeImage(
-                visionCtx, imagePath,
-                "Describe this image in detail. Include any visible text, objects, people, colors and the setting."
-            )
-            unload(ModelType.VISION) // free RAM before loading Gemma
-            if (seen.isBlank()) error("The vision model returned nothing.")
             ensureLoaded(ModelType.TEXT)
-            val ask = if (question.isBlank()) "Explain what is in this image." else question
-            val answer = NativeBridge.generate(
-                textCtx,
-                gemmaPrompt(
-                    "A vision model looked at an image the user shared and described it like this:\n\n" +
-                        "$seen\n\nUsing only that description, respond to the user's request: $ask"
-                ),
-                256
+            NativeBridge.generateStream(
+                textCtx, gemmaPrompt(prompt), 512,
+                TokenCallback { piece -> onToken(piece); true }
             )
-            ImageResult(seen, answer)
         }
+
+    /**
+     * Pipeline: LFM2.5-VL looks at the image (onSeen gets its description),
+     * then Gemma streams the final answer.
+     */
+    suspend fun analyzeImageStream(
+        imagePath: String,
+        question: String,
+        onSeen: (String) -> Unit,
+        onToken: (String) -> Unit
+    ): String = withContext(Dispatchers.Default) {
+        ensureLoaded(ModelType.VISION)
+        val seen = NativeBridge.describeImage(
+            visionCtx, imagePath,
+            "Describe this image in detail. Include any visible text, objects, people, colors and the setting."
+        )
+        unload(ModelType.VISION) // free RAM before loading Gemma
+        if (seen.isBlank()) error("The vision model returned nothing.")
+        onSeen(seen)
+        ensureLoaded(ModelType.TEXT)
+        val ask = if (question.isBlank()) "Explain what is in this image." else question
+        NativeBridge.generateStream(
+            textCtx,
+            gemmaPrompt(
+                "A vision model looked at an image the user shared and described it like this:\n\n" +
+                    "$seen\n\nUsing only that description, respond to the user's request: $ask"
+            ),
+            512,
+            TokenCallback { piece -> onToken(piece); true }
+        )
+    }
 
     suspend fun transcribe(wavPath: String): String = withContext(Dispatchers.Default) {
         ensureLoaded(ModelType.SPEECH)
