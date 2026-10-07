@@ -1,12 +1,14 @@
 package com.manoj.lofi4a.core
 
+/** Receives generated text piece by piece. Return false to stop generating. */
+fun interface TokenCallback {
+    fun onToken(piece: String): Boolean
+}
+
 /**
  * JNI bridge to the native llama.cpp / whisper.cpp runtime.
  *
  * This class is the ONLY place that talks to liblofi_jni.so.
- * Models are loaded one at a time; loading a model of a given type
- * automatically unloads any previously loaded model of that type and
- * frees its native memory.
  */
 object NativeBridge {
     init {
@@ -14,9 +16,10 @@ object NativeBridge {
     }
 
     // ---- Text (llama.cpp) ----
-    external fun loadTextModel(path: String): Long       // returns ctx pointer
+    external fun loadTextModel(path: String): Long
     external fun generate(textModelCtx: Long, prompt: String, maxTokens: Int): String
-    external fun unloadTextModel(ctx: Long)               // frees ctx + ggml memory
+    external fun generateStream(textModelCtx: Long, prompt: String, maxTokens: Int, callback: TokenCallback): String
+    external fun unloadTextModel(ctx: Long)
 
     // ---- Vision (llama.cpp mtmd) ----
     external fun loadVisionModel(modelPath: String, mmprojPath: String): Long
