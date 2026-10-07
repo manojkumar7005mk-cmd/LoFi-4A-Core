@@ -2,6 +2,8 @@ package com.manoj.lofi4a.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -62,12 +64,28 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
         ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri != null) {
-            val f = File(context.cacheDir, "picked_image")
-            context.contentResolver.openInputStream(uri)?.use { i ->
-                f.outputStream().use { o -> i.copyTo(o) }
+            // Shrink big phone photos to max ~1536px and save as a clean JPEG.
+            val f = File(context.cacheDir, "picked_image.jpg")
+            try {
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                context.contentResolver.openInputStream(uri)?.use {
+                    BitmapFactory.decodeStream(it, null, bounds)
+                }
+                var sample = 1
+                while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 1536) sample *= 2
+                val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+                val bmp = context.contentResolver.openInputStream(uri)?.use {
+                    BitmapFactory.decodeStream(it, null, opts)
+                }
+                if (bmp != null) {
+                    f.outputStream().use { o ->
+                        bmp.compress(Bitmap.CompressFormat.JPEG, 90, o)
+                    }
+                    vm.describeImage(f.absolutePath, input)
+                    input = ""
+                }
+            } catch (e: Exception) {
             }
-            vm.describeImage(f.absolutePath, input)
-            input = ""
         }
     }
 
