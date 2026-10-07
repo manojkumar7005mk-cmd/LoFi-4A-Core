@@ -171,7 +171,9 @@ Java_com_manoj_lofi4a_core_NativeBridge_describeImage(JNIEnv* env, jobject, jlon
     if (!c) { fail(env, "Vision model is not loaded."); return nullptr; }
     std::string img = to_std(env, imagePath), pr = to_std(env, prompt);
 
-    mtmd_bitmap* bmp = mtmd_helper_bitmap_init_from_file(c->mctx, img.c_str());
+   mtmd_helper_bitmap_wrapper wrap = mtmd_helper_bitmap_init_from_file(c->mctx, img.c_str(), false);
+    mtmd_bitmap* bmp = wrap.bitmap;
+    if (wrap.video_ctx) mtmd_helper_video_free(wrap.video_ctx);
     if (!bmp) { fail(env, "Could not read the image file."); return nullptr; }
 
     // LFM2 chat format (ChatML-style). BOS is added by the tokenizer.
