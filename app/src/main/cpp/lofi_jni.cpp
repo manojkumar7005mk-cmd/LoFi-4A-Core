@@ -1,7 +1,7 @@
-
 #include <jni.h>
 #include <android/log.h>
 #include <algorithm>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -20,6 +20,8 @@ constexpr int N_THREADS = 4;
 
 struct TextCtx { llama_model* model; llama_context* lctx; };
 struct VisionCtx { llama_model* model; llama_context* lctx; mtmd_context* mctx; };
+
+using PieceFn = std::function<bool(const std::string&)>;
 
 std::once_flag g_init;
 std::string g_last_log;
@@ -70,6 +72,21 @@ void fail(JNIEnv* env, const std::string& msg) {
     env->ThrowNew(c, msg.c_str());
 }
 
+// Number of leading bytes of s that form complete UTF-8 characters.
+size_t utf8_complete_prefix(const std::string& s) {
+    size_t n = s.size();
+    size_t i = n;
+    int back = 0;
+    while (i > 0 && back < 4) {
+        unsigned char c = (unsigned char) s[i - 1];
+        if ((c & 0xC0) == 0x80) { i--; back++; continue; }
+        size_t need = (c >= 0xF0) ? 4 : (c >= 0xE0) ? 3 : (c >= 0xC0) ? 2 : 1;
+        size_t have = n - (i - 1);
+        return have >= need ? n : i - 1;
+    }
+    return n;
+}
+
 llama_model* load_model(const std::string& path) {
     init_backend();
     llama_model_params mp = llama_model_default_params();
@@ -103,24 +120,65 @@ bool decode_all(llama_context* lctx, std::vector<llama_token>& toks) {
     return true;
 }
 
-// Samples after the prompt has already been decoded.
-std::string sample_loop(llama_context* lctx, const llama_vocab* vocab, int maxTokens) {
+// Samples after the prompt has already been decoded. Calls on_piece (if set)
+// with each chunk of complete UTF-8 text as soon as it is produced.
+std::string sample_loop(llama_context* lctx, const llama_vocab* vocab, int maxTokens, const PieceFn& on_piece) {
     llama_sampler* smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
     llama_sampler_chain_add(smpl, llama_sampler_init_top_k(40));
     llama_sampler_chain_add(smpl, llama_sampler_init_top_p(0.9f, 1));
     llama_sampler_chain_add(smpl, llama_sampler_init_temp(0.7f));
     llama_sampler_chain_add(smpl, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
-    std::string out;
-    for (int i = 0; i < maxTokens; i++) {
+    std::string out, pending;
+    bool keep_going = true;
+    for (int i = 0; i < maxTokens && keep_going; i++) {
         llama_token tok = llama_sampler_sample(smpl, lctx, -1);
         if (llama_vocab_is_eog(vocab, tok)) break;
         char buf[256];
         int n = llama_token_to_piece(vocab, tok, buf, sizeof(buf), 0, false);
-        if (n > 0) out.append(buf, (size_t) n);
+        if (n > 0) {
+            out.append(buf, (size_t) n);
+            pending.append(buf, (size_t) n);
+            size_t k = utf8_complete_prefix(pending);
+            if (k > 0 && on_piece) {
+                std::string chunk = pending.substr(0, k);
+                pending.erase(0, k);
+                if (!on_piece(chunk)) keep_going = false;
+            }
+        }
         if (llama_decode(lctx, llama_batch_get_one(&tok, 1)) != 0) break;
     }
+    if (!pending.empty() && on_piece && keep_going) on_piece(pending);
     llama_sampler_free(smpl);
     return out;
+}
+
+// Builds a callback that sends each piece to a Kotlin TokenCallback.onToken(String): Boolean
+PieceFn make_emitter(JNIEnv* env, jobject cb) {
+    if (!cb) return nullptr;
+    jclass cls = env->GetObjectClass(cb);
+    jmethodID mid = env->GetMethodID(cls, "onToken", "(Ljava/lang/String;)Z");
+    env->DeleteLocalRef(cls);
+    if (!mid) { env->ExceptionClear(); return nullptr; }
+    return [env, cb, mid](const std::string& s) -> bool {
+        jstring js = to_jstring(env, s);
+        jboolean keep = env->CallBooleanMethod(cb, mid, js);
+        env->DeleteLocalRef(js);
+        if (env->ExceptionCheck()) { env->ExceptionClear(); return false; }
+        return keep == JNI_TRUE;
+    };
+}
+
+jstring run_generate(JNIEnv* env, jlong ptr, jstring prompt, jint maxTokens, jobject cb) {
+    auto* c = reinterpret_cast<TextCtx*>(ptr);
+    if (!c) { fail(env, "Text model is not loaded."); return nullptr; }
+    const llama_vocab* vocab = llama_model_get_vocab(c->model);
+    std::vector<llama_token> toks = tokenize(vocab, to_std(env, prompt));
+    if (toks.empty()) { fail(env, "Could not tokenize prompt."); return nullptr; }
+    if ((int) toks.size() + maxTokens > N_CTX) { fail(env, "Prompt is too long."); return nullptr; }
+    llama_memory_clear(llama_get_memory(c->lctx), true);
+    if (!decode_all(c->lctx, toks)) { fail(env, "Text model failed to read the prompt."); return nullptr; }
+    PieceFn emit = make_emitter(env, cb);
+    return to_jstring(env, sample_loop(c->lctx, vocab, maxTokens, emit));
 }
 } // namespace
 
@@ -141,15 +199,12 @@ Java_com_manoj_lofi4a_core_NativeBridge_loadTextModel(JNIEnv* env, jobject, jstr
 
 JNIEXPORT jstring JNICALL
 Java_com_manoj_lofi4a_core_NativeBridge_generate(JNIEnv* env, jobject, jlong ptr, jstring prompt, jint maxTokens) {
-    auto* c = reinterpret_cast<TextCtx*>(ptr);
-    if (!c) { fail(env, "Text model is not loaded."); return nullptr; }
-    const llama_vocab* vocab = llama_model_get_vocab(c->model);
-    std::vector<llama_token> toks = tokenize(vocab, to_std(env, prompt));
-    if (toks.empty()) { fail(env, "Could not tokenize prompt."); return nullptr; }
-    if ((int) toks.size() + maxTokens > N_CTX) { fail(env, "Prompt is too long."); return nullptr; }
-    llama_memory_clear(llama_get_memory(c->lctx), true);
-    if (!decode_all(c->lctx, toks)) { fail(env, "Text model failed to read the prompt."); return nullptr; }
-    return to_jstring(env, sample_loop(c->lctx, vocab, maxTokens));
+    return run_generate(env, ptr, prompt, maxTokens, nullptr);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_manoj_lofi4a_core_NativeBridge_generateStream(JNIEnv* env, jobject, jlong ptr, jstring prompt, jint maxTokens, jobject callback) {
+    return run_generate(env, ptr, prompt, maxTokens, callback);
 }
 
 JNIEXPORT void JNICALL
@@ -174,6 +229,7 @@ Java_com_manoj_lofi4a_core_NativeBridge_loadVisionModel(JNIEnv* env, jobject, js
     mtmd_context_params mp = mtmd_context_params_default();
     mp.use_gpu = false;
     mp.n_threads = N_THREADS;
+    mp.media_marker = mtmd_default_marker();   // make the marker explicit
     mtmd_context* mctx = mtmd_init_from_file(mm.c_str(), model, mp);
     if (!mctx) {
         llama_free(lctx); llama_model_free(model);
@@ -220,7 +276,7 @@ Java_com_manoj_lofi4a_core_NativeBridge_describeImage(JNIEnv* env, jobject, jlon
     if (r != 0) { fail(env, "Vision model failed to read the image (error " + std::to_string(r) + ")."); return nullptr; }
 
     const llama_vocab* vocab = llama_model_get_vocab(c->model);
-    return to_jstring(env, sample_loop(c->lctx, vocab, 300));
+    return to_jstring(env, sample_loop(c->lctx, vocab, 300, nullptr));
 }
 
 JNIEXPORT void JNICALL
