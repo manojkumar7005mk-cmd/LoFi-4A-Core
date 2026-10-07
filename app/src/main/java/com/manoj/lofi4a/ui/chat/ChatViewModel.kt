@@ -39,35 +39,64 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun addMessage(text: String, isUser: Boolean) {
-        _messages.value = _messages.value + ChatMessage(text, isUser)
+        _messages.update { it + ChatMessage(text, isUser) }
+    }
+
+    /** Appends text to the last (bot) message — used while streaming. */
+    private fun appendToLast(piece: String) {
+        _messages.update { list ->
+            if (list.isEmpty()) list
+            else list.dropLast(1) + list.last().copy(text = list.last().text + piece)
+        }
+    }
+
+    /** Shows an error in the current bot bubble (keeps any text already streamed). */
+    private fun failLast(msg: String) {
+        _messages.update { list ->
+            if (list.isEmpty() || list.last().isUser) list + ChatMessage("Error: $msg", false)
+            else {
+                val last = list.last()
+                val t = if (last.text.isBlank()) "Error: $msg" else last.text + "\n\nError: $msg"
+                list.dropLast(1) + last.copy(text = t)
+            }
+        }
     }
 
     fun send(prompt: String) {
         if (prompt.isBlank()) return
         addMessage(prompt, isUser = true)
+        addMessage("", isUser = false) // bubble that fills in as tokens arrive
         _generating.value = true
         viewModelScope.launch(Dispatchers.Default) {
             try {
-                addMessage(modelManager.generateText(prompt), isUser = false)
+                modelManager.generateTextStream(prompt) { appendToLast(it) }
             } catch (e: Exception) {
-                addMessage("Error: ${e.message}", isUser = false)
+                failLast(e.message ?: "unknown error")
             } finally {
                 _generating.value = false
             }
         }
     }
 
-    /** LFM2.5-VL looks at the image, then Gemma answers using that description. */
+    /** LFM2.5-VL looks at the image, then Gemma streams the answer. */
     fun describeImage(imagePath: String, question: String = "") {
         addMessage(if (question.isBlank()) "🖼️ Image attached" else "🖼️ $question", isUser = true)
+        addMessage("🔍 Looking at the image…", isUser = false)
         _generating.value = true
         viewModelScope.launch(Dispatchers.Default) {
             try {
-                val r = modelManager.analyzeImage(imagePath, question)
-                addMessage("👁️ LFM saw: ${r.seen}", isUser = false)
-                addMessage(r.answer, isUser = false)
+                modelManager.analyzeImageStream(
+                    imagePath, question,
+                    onSeen = { seen ->
+                        // replace the "Looking…" bubble with what LFM saw, then start Gemma's bubble
+                        _messages.update { list ->
+                            list.dropLast(1) + ChatMessage("👁️ LFM saw: $seen", false) + ChatMessage("", false)
+                        }
+                    },
+                    onToken = { appendToLast(it) }
+                )
             } catch (e: Exception) {
-                addMessage("Error: ${e.message}", isUser = false)
+                failLast(e.message ?: "unknown error")
             } finally {
                 _generating.value = false
             }
