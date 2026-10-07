@@ -229,7 +229,8 @@ Java_com_manoj_lofi4a_core_NativeBridge_loadVisionModel(JNIEnv* env, jobject, js
     mtmd_context_params mp = mtmd_context_params_default();
     mp.use_gpu = false;
     mp.n_threads = N_THREADS;
-    mp.media_marker = mtmd_default_marker();   // make the marker explicit
+    mp.image_marker = nullptr;                 // switch off the legacy marker
+    mp.media_marker = mtmd_default_marker();  // make the marker explicit
     mtmd_context* mctx = mtmd_init_from_file(mm.c_str(), model, mp);
     if (!mctx) {
         llama_free(lctx); llama_model_free(model);
