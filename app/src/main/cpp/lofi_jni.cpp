@@ -256,11 +256,13 @@ Java_com_manoj_lofi4a_core_NativeBridge_describeImage(JNIEnv* env, jobject, jlon
     int32_t r = -1;
     const char* ctx_marker = mtmd_get_marker(c->mctx);
     const char* markers[2] = { ctx_marker, mtmd_default_marker() };
+    std::string last_sent;
     g_last_log.clear();
     for (const char* marker : markers) {
         if (!marker) continue;
         std::string full = "<|im_start|>user\n" + std::string(marker) + "\n" + pr +
                            "<|im_end|>\n<|im_start|>assistant\n";
+        last_sent = full.substr(0, 70);
         mtmd_input_text txt;
         txt.text = full.c_str();
         txt.add_special = true;
@@ -273,7 +275,9 @@ Java_com_manoj_lofi4a_core_NativeBridge_describeImage(JNIEnv* env, jobject, jlon
     }
     if (r != 0 || !chunks) {
         mtmd_bitmap_free(bmp);
-        fail(env, "Could not process the image (tokenize error " + std::to_string(r) + "). " + g_last_log);
+        std::string diag = std::string(" [build v3] ctx_marker=[") + (ctx_marker ? ctx_marker : "null") +
+                           "] default=[" + mtmd_default_marker() + "] sent=[" + last_sent + "]";
+        fail(env, "Could not process the image (tokenize error " + std::to_string(r) + "). " + g_last_log + diag);
         return nullptr;
     }
 
