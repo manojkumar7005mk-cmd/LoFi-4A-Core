@@ -1,4 +1,4 @@
-   package com.manoj.lofi4a.core
+package com.manoj.lofi4a.core
 
 import android.content.Context
 import android.net.ConnectivityManager
@@ -34,6 +34,9 @@ class ModelManager(private val context: Context) {
     private var textCtx: Long = 0
     private var visionCtx: Long = 0
     private var speechCtx: Long = 0
+
+    @Volatile private var stopRequested = false
+    fun requestStop() { stopRequested = true }
 
     private val loadLock = Any()
 
@@ -291,7 +294,7 @@ class ModelManager(private val context: Context) {
     private fun streamAnswer(userMsg: String, historyText: String, onToken: (String) -> Unit): String {
         val reply = NativeBridge.generateStream(
             textCtx, buildPrompt(userMsg), 512,
-            TokenCallback { piece -> onToken(piece); true }
+            TokenCallback { piece -> onToken(piece); !stopRequested }
         ).trim()
         if (reply.isNotEmpty()) synchronized(history) { history.add(historyText to reply) }
         return reply
@@ -300,6 +303,7 @@ class ModelManager(private val context: Context) {
     /** Streams StudyMate's answer: onToken is called with each piece as it is generated. */
     suspend fun generateTextStream(prompt: String, onToken: (String) -> Unit): String =
         withContext(Dispatchers.Default) {
+            stopRequested = false
             ensureLoaded(ModelType.TEXT)
             streamAnswer(prompt, prompt, onToken)
         }
@@ -321,6 +325,7 @@ class ModelManager(private val context: Context) {
         onSeen: (String) -> Unit,
         onToken: (String) -> Unit
     ): String = withContext(Dispatchers.Default) {
+        stopRequested = false
         error(FlorenceEngine.inspect(context))  // TEMP step 1: show Florence names in chat
         ensureLoaded(ModelType.VISION)
         val visionPrompt = if (question.isBlank()) {
