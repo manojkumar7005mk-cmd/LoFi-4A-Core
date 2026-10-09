@@ -275,30 +275,39 @@ Java_com_manoj_lofi4a_core_NativeBridge_describeImage(JNIEnv* env, jobject, jlon
     if (!bmp) { fail(env, "Could not read the image file."); return nullptr; }
 
     // LFM2 chat format (ChatML-style). BOS is added by the tokenizer.
-    // The media marker must be the one THIS context expects, so ask the context for it.
+    // Try the asked prompt first; if the engine refuses it, retry with the plain prompt that is known to work.
+    // For each prompt, try the marker this context expects, then the default marker.
     mtmd_input_chunks* chunks = nullptr;
     const mtmd_bitmap* bitmaps[1] = {bmp};
     int32_t r = -1;
     const char* ctx_marker = mtmd_get_marker(c->mctx);
     const char* markers[2] = { ctx_marker, mtmd_default_marker() };
+    const std::string prompts[2] = { pr, std::string("Describe this image in detail.") };
+    std::string tried;
     g_last_log.clear();
-    for (const char* marker : markers) {
-        if (!marker) continue;
-        std::string full = "<|im_start|>user\n" + std::string(marker) + "\n" + pr +
-                           "<|im_end|>\n<|im_start|>assistant\n";
-        mtmd_input_text txt;
-        txt.text = full.c_str();
-        txt.add_special = true;
-        txt.parse_special = true;
-        chunks = mtmd_input_chunks_init();
-        r = mtmd_tokenize(c->mctx, chunks, &txt, bitmaps, 1);
+    for (const std::string& p : prompts) {
+        for (const char* marker : markers) {
+            if (!marker) continue;
+            std::string full = "<|im_start|>user\n" + std::string(marker) + "\n" + p +
+                               "<|im_end|>\n<|im_start|>assistant\n";
+            tried = full.substr(0, 60);
+            mtmd_input_text txt;
+            txt.text = full.c_str();
+            txt.add_special = true;
+            txt.parse_special = true;
+            chunks = mtmd_input_chunks_init();
+            r = mtmd_tokenize(c->mctx, chunks, &txt, bitmaps, 1);
+            if (r == 0) break;
+            mtmd_input_chunks_free(chunks);
+            chunks = nullptr;
+        }
         if (r == 0) break;
-        mtmd_input_chunks_free(chunks);
-        chunks = nullptr;
     }
     if (r != 0 || !chunks) {
         mtmd_bitmap_free(bmp);
-        fail(env, "Could not process the image (tokenize error " + std::to_string(r) + "). " + g_last_log);
+        std::string diag = std::string(" [v5] ctx=[") + (ctx_marker ? ctx_marker : "null") +
+                           "] def=[" + mtmd_default_marker() + "] last_text=[" + tried + "]";
+        fail(env, "Could not process the image (tokenize error " + std::to_string(r) + "). " + g_last_log + diag);
         return nullptr;
     }
 
