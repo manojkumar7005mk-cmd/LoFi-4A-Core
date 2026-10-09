@@ -29,7 +29,7 @@ private val tech = listOf(
 private val licenses = listOf(
     LicenseEntry("llama.cpp", "MIT", "https://github.com/ggml-org/llama.cpp"),
     LicenseEntry("whisper.cpp", "MIT", "https://github.com/ggml-org/whisper.cpp"),
-    LicenseEntry("Gemma 3", "Gemma Terms of Use", "https://ai.google.dev/gemma/terms"),
+    LicenseEntry("Qwen3", "Apache 2.0", "https://huggingface.co/Qwen/Qwen3-1.7B"),
     LicenseEntry("LFM2.5-VL", "LFM Open License", "https://www.liquid.ai/"),
     LicenseEntry("OpenAI Whisper", "MIT", "https://github.com/openai/whisper"),
     LicenseEntry("ggml", "MIT", "https://github.com/ggml-org/ggml")
