@@ -8,6 +8,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -21,6 +22,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
@@ -29,9 +32,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -41,6 +46,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.manoj.lofi4a.R
 import com.manoj.lofi4a.core.WavRecorder
 import com.manoj.lofi4a.ui.Routes
 import com.manoj.lofi4a.ui.chat.ChatMessage
@@ -101,7 +107,7 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
                 }
                 if (bmp != null) {
                     f.outputStream().use { o -> bmp.compress(Bitmap.CompressFormat.JPEG, 90, o) }
-                    val scale = 160f / maxOf(bmp.width, bmp.height)
+                    val scale = 200f / maxOf(bmp.width, bmp.height)
                     pendingThumb = Bitmap.createScaledBitmap(
                         bmp,
                         (bmp.width * scale).toInt().coerceAtLeast(1),
@@ -140,18 +146,34 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text("StudyMate", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            statusLine,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Image(
+                            painter = painterResource(R.drawable.studymate_logo),
+                            contentDescription = null,
+                            modifier = Modifier.size(34.dp)
                         )
+                        Spacer(Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                "StudyMate",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                statusLine,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                ),
                 actions = {
                     IconButton(onClick = { vm.newChat() }, enabled = !generating) {
                         Icon(Icons.Default.Refresh, contentDescription = "New chat")
@@ -177,7 +199,7 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
                 state = listState,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
                 itemsIndexed(messages) { index, msg ->
                     val thinking = generating &&
@@ -211,52 +233,73 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
                 }
             }
 
+            // ChatGPT-style input bar
             Surface(
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 3.dp,
-                modifier = Modifier.fillMaxWidth()
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
                 Column {
                     pendingThumb?.let { thumb ->
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            modifier = Modifier.padding(start = 14.dp, top = 12.dp, end = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Image(
                                 bitmap = thumb.asImageBitmap(),
-                                contentDescription = "Attached image",
+                                contentDescription = "Attached photo",
                                 contentScale = ContentScale.Crop,
-                                modifier = Modifier.size(56.dp).clip(RoundedCornerShape(10.dp))
+                                modifier = Modifier.size(64.dp).clip(RoundedCornerShape(12.dp))
                             )
                             Spacer(Modifier.width(12.dp))
                             Text(
-                                "Image ready. Ask a question or press send.",
+                                "Photo attached",
                                 style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.weight(1f)
                             )
-                            TextButton(onClick = {
+                            IconButton(onClick = {
                                 pendingImage = null
                                 pendingThumb = null
                             }) {
-                                Text("Remove")
+                                Icon(Icons.Default.Close, contentDescription = "Remove photo")
                             }
                         }
                     }
 
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.Bottom
                     ) {
                         IconButton(
                             onClick = { imagePicker.launch("image/*") },
                             enabled = !generating
                         ) {
-                            Text("🖼️", style = MaterialTheme.typography.titleLarge)
+                            Icon(Icons.Default.Add, contentDescription = "Add photo")
                         }
+
+                        TextField(
+                            value = input,
+                            onValueChange = { input = it },
+                            modifier = Modifier.weight(1f),
+                            placeholder = {
+                                Text(if (pendingImage != null) "Ask about this photo" else "Ask StudyMate")
+                            },
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                disabledContainerColor = Color.Transparent,
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent,
+                                disabledIndicatorColor = Color.Transparent
+                            ),
+                            maxLines = 6,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                            keyboardActions = KeyboardActions(onSend = { sendNow() })
+                        )
+
                         IconButton(
                             onClick = {
                                 if (recording) {
@@ -274,49 +317,64 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
                             },
                             enabled = !generating
                         ) {
-                            Text(if (recording) "⏹️" else "🎤", style = MaterialTheme.typography.titleLarge)
+                            Icon(
+                                painter = painterResource(R.drawable.ic_mic),
+                                contentDescription = "Voice",
+                                tint = if (recording) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
 
-                        OutlinedTextField(
-                            value = input,
-                            onValueChange = { input = it },
-                            modifier = Modifier.weight(1f),
-                            placeholder = {
-                                Text(if (pendingImage != null) "Ask about this image" else "Message StudyMate")
-                            },
-                            shape = RoundedCornerShape(26.dp),
-                            maxLines = 6,
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                            keyboardActions = KeyboardActions(onSend = { sendNow() })
+                        SendStopButton(
+                            generating = generating,
+                            canSend = input.isNotBlank() || pendingImage != null,
+                            onSend = { sendNow() },
+                            onStop = { vm.stop() }
                         )
-
-                        Spacer(Modifier.width(8.dp))
-
-                        if (generating) {
-                            FilledIconButton(
-                                onClick = { vm.stop() },
-                                colors = IconButtonDefaults.filledIconButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.error,
-                                    contentColor = MaterialTheme.colorScheme.onError
-                                )
-                            ) {
-                                Text(
-                                    "■",
-                                    color = MaterialTheme.colorScheme.onError,
-                                    style = MaterialTheme.typography.titleMedium
-                                )
-                            }
-                        } else {
-                            FilledIconButton(
-                                onClick = { sendNow() },
-                                enabled = input.isNotBlank() || pendingImage != null
-                            ) {
-                                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
-                            }
-                        }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SendStopButton(
+    generating: Boolean,
+    canSend: Boolean,
+    onSend: () -> Unit,
+    onStop: () -> Unit
+) {
+    val bg = when {
+        generating -> MaterialTheme.colorScheme.onSurface
+        canSend -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+    }
+    Box(
+        modifier = Modifier
+            .padding(4.dp)
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(bg)
+            .clickable(enabled = generating || canSend) {
+                if (generating) onStop() else onSend()
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        if (generating) {
+            Box(
+                Modifier
+                    .size(14.dp)
+                    .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(3.dp))
+            )
+        } else {
+            Icon(
+                Icons.AutoMirrored.Filled.Send,
+                contentDescription = "Send",
+                tint = if (canSend) MaterialTheme.colorScheme.onPrimary
+                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                modifier = Modifier.size(20.dp)
+            )
         }
     }
 }
@@ -334,22 +392,18 @@ private fun MessageRow(msg: ChatMessage, thinking: Boolean) {
                     Text(
                         msg.text,
                         color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
                     )
                 }
             }
         }
     } else {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-            Box(
-                modifier = Modifier
-                    .size(28.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("S", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
-            }
+            Image(
+                painter = painterResource(R.drawable.studymate_logo),
+                contentDescription = null,
+                modifier = Modifier.size(28.dp)
+            )
             Spacer(Modifier.width(12.dp))
             SelectionContainer(modifier = Modifier.weight(1f)) {
                 Text(
