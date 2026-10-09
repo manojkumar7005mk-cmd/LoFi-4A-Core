@@ -320,7 +320,7 @@ class ModelManager(private val context: Context) {
         question: String,
         onSeen: (String) -> Unit,
         onToken: (String) -> Unit
-    ): String = withContext(Dispatchers.Default) {
+error(FlorenceEngine.inspect(context))  // TEMP step 1: show Florence names in chat
         ensureLoaded(ModelType.VISION)
         val visionPrompt = if (question.isBlank()) {
             "Describe this image factually in 4 to 6 sentences. " +
