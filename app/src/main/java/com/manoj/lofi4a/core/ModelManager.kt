@@ -1,4 +1,4 @@
-package com.manoj.lofi4a.core
+   package com.manoj.lofi4a.core
 
 import android.content.Context
 import android.net.ConnectivityManager
@@ -320,7 +320,8 @@ class ModelManager(private val context: Context) {
         question: String,
         onSeen: (String) -> Unit,
         onToken: (String) -> Unit
-error(FlorenceEngine.inspect(context))  // TEMP step 1: show Florence names in chat
+    ): String = withContext(Dispatchers.Default) {
+        error(FlorenceEngine.inspect(context))  // TEMP step 1: show Florence names in chat
         ensureLoaded(ModelType.VISION)
         val visionPrompt = if (question.isBlank()) {
             "Describe this image factually in 4 to 6 sentences. " +
