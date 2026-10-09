@@ -14,8 +14,8 @@ import androidx.compose.ui.unit.dp
 private data class LicenseEntry(val name: String, val license: String, val note: String)
 
 private val backendModels = listOf(
-    Triple("Text", "Gemma 3 1B Instruct (GGUF Q4_K_M)", "Apache 2.0"),
-    Triple("Vision", "LFM2-VL 450M (GGUF + mmproj)", "Apache 2.0"),
+    Triple("Text", "Gemma 3 1B Instruct (GGUF Q4_K_M)", "Gemma Terms of Use"),
+    Triple("Vision", "LFM2.5-VL 450M (GGUF + mmproj)", "LFM Open License"),
     Triple("Speech", "Whisper Base (GGUF)", "MIT")
 )
 
@@ -29,8 +29,8 @@ private val tech = listOf(
 private val licenses = listOf(
     LicenseEntry("llama.cpp", "MIT", "https://github.com/ggml-org/llama.cpp"),
     LicenseEntry("whisper.cpp", "MIT", "https://github.com/ggml-org/whisper.cpp"),
-    LicenseEntry("Gemma 3", "Apache 2.0", "Terms: https://ai.google.dev/gemma/terms"),
-    LicenseEntry("LFM2-VL", "Apache 2.0", "https://www.liquid.ai/"),
+    LicenseEntry("Gemma 3", "Gemma Terms of Use", "https://ai.google.dev/gemma/terms"),
+    LicenseEntry("LFM2.5-VL", "LFM Open License", "https://www.liquid.ai/"),
     LicenseEntry("OpenAI Whisper", "MIT", "https://github.com/openai/whisper"),
     LicenseEntry("ggml", "MIT", "https://github.com/ggml-org/ggml")
 )
@@ -41,12 +41,17 @@ fun AboutScreen(onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("About") },
+                title = { Text("About StudyMate AI") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                )
             )
         }
     ) { padding ->
@@ -58,7 +63,12 @@ fun AboutScreen(onBack: () -> Unit) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text("LoFi-4A Core", style = MaterialTheme.typography.headlineMedium)
+            Text("🎓 StudyMate AI", style = MaterialTheme.typography.headlineMedium)
+            Text(
+                "Your friendly offline study buddy. It explains lessons, solves sums step by step, " +
+                    "and reads pages from your books, all on your phone.",
+                style = MaterialTheme.typography.bodyMedium
+            )
             Text(
                 "Designed and developed by Manoj Kumar, a student.",
                 style = MaterialTheme.typography.bodyMedium
