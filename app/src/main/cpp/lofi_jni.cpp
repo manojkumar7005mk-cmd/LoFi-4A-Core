@@ -122,20 +122,37 @@ bool decode_all(llama_context* lctx, std::vector<llama_token>& toks) {
 
 // Samples after the prompt has already been decoded. Calls on_piece (if set)
 // with each chunk of complete UTF-8 text as soon as it is produced.
-// A repeat penalty and a repetition guard stop small models from looping.
+// A hand-made repeat penalty and a repetition guard stop small models from looping.
 std::string sample_loop(llama_context* lctx, const llama_vocab* vocab, int maxTokens,
                         const PieceFn& on_piece, float temp) {
     llama_sampler* smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
-    llama_sampler_chain_add(smpl, llama_sampler_init_penalties(64, 1.15f, 0.0f, 0.0f));
     llama_sampler_chain_add(smpl, llama_sampler_init_top_k(40));
     llama_sampler_chain_add(smpl, llama_sampler_init_top_p(0.9f, 1));
     llama_sampler_chain_add(smpl, llama_sampler_init_temp(temp));
     llama_sampler_chain_add(smpl, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+    const int n_vocab = llama_vocab_n_tokens(vocab);
+    const float repeat_penalty = 1.15f;
+    std::vector<llama_token> recent;   // the last 64 tokens
     std::string out, pending;
     bool keep_going = true;
     for (int i = 0; i < maxTokens && keep_going; i++) {
+        // push down tokens that were just used, so the model doesn't repeat itself
+        float* logits = llama_get_logits_ith(lctx, -1);
+        if (logits && !recent.empty()) {
+            std::vector<llama_token> uniq(recent);
+            std::sort(uniq.begin(), uniq.end());
+            uniq.erase(std::unique(uniq.begin(), uniq.end()), uniq.end());
+            for (llama_token t : uniq) {
+                if (t >= 0 && t < n_vocab) {
+                    logits[t] = logits[t] > 0 ? logits[t] / repeat_penalty : logits[t] * repeat_penalty;
+                }
+            }
+        }
         llama_token tok = llama_sampler_sample(smpl, lctx, -1);
         if (llama_vocab_is_eog(vocab, tok)) break;
+        recent.push_back(tok);
+        if (recent.size() > 64) recent.erase(recent.begin());
+
         char buf[256];
         int n = llama_token_to_piece(vocab, tok, buf, sizeof(buf), 0, false);
         if (n > 0) {
