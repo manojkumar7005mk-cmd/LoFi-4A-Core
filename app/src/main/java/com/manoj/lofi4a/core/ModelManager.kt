@@ -38,6 +38,8 @@ class ModelManager(private val context: Context) {
     private val loadLock = Any()
 
     init {
+        // Remove the old Gemma file (if an earlier version downloaded it) to free ~800 MB.
+        File(modelsDir, "gemma-3-1b-it-Q4_K_M.gguf").delete()
         refreshStatuses()
         monitorConnectivity()
     }
@@ -226,7 +228,7 @@ class ModelManager(private val context: Context) {
             "When a lesson comes from a book or textbook page, explain it in your own words and point out the key points. " +
             "Be encouraging and keep answers short unless the student asks for more detail. " +
             "If asked who you are, say you are StudyMate AI, an offline study buddy made to help students learn. " +
-            "Never say you are Gemma or that any company made you; if asked what you are built on, " +
+            "Never say you are Qwen or that any company made you; if asked what you are built on, " +
             "say you are built on open base models and set up specially as a teacher."
 
     // (student message, StudyMate reply) pairs, oldest first
@@ -240,7 +242,11 @@ class ModelManager(private val context: Context) {
         imageContext = null
     }
 
-    /** Builds a Gemma chat prompt: persona + (optional) image notes + recent turns + new message. */
+    /**
+     * Builds a Qwen3 (ChatML) prompt: system persona (+ optional image notes) + recent turns + new message.
+     * Qwen3 "thinking" is switched off by pre-filling an empty <think></think> block, so the student
+     * gets a direct answer instead of long hidden reasoning (faster on a phone).
+     */
     private fun buildPrompt(userMsg: String): String {
         val sys = StringBuilder(systemPrompt)
         imageContext?.let {
@@ -258,18 +264,13 @@ class ModelManager(private val context: Context) {
             kept.addFirst(t)
         }
         val sb = StringBuilder()
-        var sysPending: String? = sys.toString()
-        fun addUser(text: String) {
-            sb.append("<start_of_turn>user\n")
-            sysPending?.let { sb.append(it).append("\n\n"); sysPending = null }
-            sb.append(text).append("<end_of_turn>\n")
-        }
+        sb.append("<|im_start|>system\n").append(sys).append("<|im_end|>\n")
         for ((u, a) in kept) {
-            addUser(u)
-            sb.append("<start_of_turn>model\n").append(a).append("<end_of_turn>\n")
+            sb.append("<|im_start|>user\n").append(u).append("<|im_end|>\n")
+            sb.append("<|im_start|>assistant\n").append(a).append("<|im_end|>\n")
         }
-        addUser(userMsg)
-        sb.append("<start_of_turn>model\n")
+        sb.append("<|im_start|>user\n").append(userMsg).append("<|im_end|>\n")
+        sb.append("<|im_start|>assistant\n<think>\n\n</think>\n\n")
         return sb.toString()
     }
 
@@ -312,7 +313,7 @@ class ModelManager(private val context: Context) {
 
     /**
      * Pipeline: LFM2.5-VL looks at the image (onSeen gets what it saw),
-     * then StudyMate (Gemma) explains it like a teacher and streams the answer.
+     * then StudyMate (Qwen3) explains it like a teacher and streams the answer.
      */
     suspend fun analyzeImageStream(
         imagePath: String,
@@ -329,7 +330,7 @@ class ModelManager(private val context: Context) {
                 "If it contains text, numbers or equations, read them exactly.\nQuestion: $question"
         }
         val raw = NativeBridge.describeImage(visionCtx, imagePath, visionPrompt)
-        unload(ModelType.VISION) // free RAM before loading Gemma
+        unload(ModelType.VISION) // free RAM before loading Qwen3
         val seen = cleanSeen(raw)
         if (seen.isBlank()) error("The vision model returned nothing.")
         imageContext = seen
