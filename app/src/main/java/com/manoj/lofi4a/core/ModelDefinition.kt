@@ -18,30 +18,29 @@ data class ModelDefinition(
             ModelDefinition(
                 id = "qwen3-1.7b-q4km",
                 type = ModelType.TEXT,
-                displayName = "StudyMate Main",
+                displayName = "Qwen3 1.7B (Q4_K_M)",
                 sizeLabel = "~1.1 GB",
-                licenseName = "School project only",
+                licenseName = "Apache 2.0",
                 fileName = "Qwen3-1.7B-Q4_K_M.gguf",
                 downloadUrl = "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf"
             ),
             ModelDefinition(
                 id = "lfm25-vl-450m",
                 type = ModelType.VISION,
-                displayName = "StudyMate VL",
+                displayName = "LFM2.5-VL 450M (Q4_0)",
                 sizeLabel = "~350 MB",
-                licenseName = "School project only",
+                licenseName = "LFM Open License",
                 fileName = "LFM2.5-VL-450M-Q4_0.gguf",
                 downloadUrl = "https://huggingface.co/LiquidAI/LFM2.5-VL-450M-GGUF/resolve/main/LFM2.5-VL-450M-Q4_0.gguf",
                 mmprojFileName = "mmproj-LFM2.5-VL-450m-Q8_0.gguf",
                 mmprojUrl = "https://huggingface.co/LiquidAI/LFM2.5-VL-450M-GGUF/resolve/main/mmproj-LFM2.5-VL-450m-Q8_0.gguf"
             ),
-            // Speech is kept here because the model manager looks it up, but it is hidden from the list (see ModelsViewModel).
             ModelDefinition(
                 id = "whisper-base",
                 type = ModelType.SPEECH,
                 displayName = "Whisper Base",
                 sizeLabel = "~145 MB",
-                licenseName = "School project only",
+                licenseName = "MIT",
                 fileName = "ggml-base.bin",
                 downloadUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
             )
