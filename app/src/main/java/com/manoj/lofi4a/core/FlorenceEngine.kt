@@ -9,21 +9,17 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 
-/** Florence-2 (base, ONNX) — image reader. Step 1: download + report input/output names. */
+/** Florence-2 base (ONNX, MIT). Step 1: download the model files and report their input/output names. */
 object FlorenceEngine {
-    private const val BASE = "https://huggingface.co/TensorStack/florence2-onnx/resolve/main/"
-    private val FILES = listOf(
-        "vision_encoder.onnx", "embed_tokens.onnx", "encoder_model.onnx",
-        "decoder_model_merged.onnx", "vocab.json", "merges.txt", "tokenizer_config.json"
-    )
+    private const val BASE = "https://huggingface.co/onnx-community/Florence-2-base-ft/resolve/main/onnx/"
     private val SESSIONS = listOf("vision_encoder", "embed_tokens", "encoder_model", "decoder_model_merged")
 
     private fun dir(context: Context): File = File(context.filesDir, "florence").apply { mkdirs() }
 
     fun ensureFiles(context: Context) {
-        for (name in FILES) {
-            val dest = File(dir(context), name)
-            if (!dest.exists() || dest.length() == 0L) download(BASE + name, dest)
+        for (name in SESSIONS) {
+            val dest = File(dir(context), "$name.onnx")
+            if (!dest.exists() || dest.length() == 0L) download(BASE + "$name.onnx", dest)
         }
     }
 
