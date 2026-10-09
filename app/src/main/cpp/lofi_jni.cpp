@@ -126,8 +126,8 @@ bool decode_all(llama_context* lctx, std::vector<llama_token>& toks) {
 std::string sample_loop(llama_context* lctx, const llama_vocab* vocab, int maxTokens,
                         const PieceFn& on_piece, float temp) {
     llama_sampler* smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
-    llama_sampler_chain_add(smpl, llama_sampler_init_top_k(40));
-    llama_sampler_chain_add(smpl, llama_sampler_init_top_p(0.9f, 1));
+llama_sampler_chain_add(smpl, llama_sampler_init_top_k(20));
+llama_sampler_chain_add(smpl, llama_sampler_init_top_p(0.8f, 1));
     llama_sampler_chain_add(smpl, llama_sampler_init_temp(temp));
     llama_sampler_chain_add(smpl, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
     const int n_vocab = llama_vocab_n_tokens(vocab);
