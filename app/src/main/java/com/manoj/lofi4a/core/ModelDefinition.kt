@@ -6,39 +6,44 @@ data class ModelDefinition(
     val id: String,
     val type: ModelType,
     val displayName: String,
+    val role: String,
     val sizeLabel: String,
     val licenseName: String,
     val fileName: String,
     val downloadUrl: String,
     val mmprojFileName: String? = null,
-    val mmprojUrl: String? = null
+    val mmprojUrl: String? = null,
+    // more files that belong to this model: (path inside the models folder, download url)
+    val extraFiles: List<Pair<String, String>> = emptyList()
 ) {
     companion object {
         val BUILTINS = listOf(
             ModelDefinition(
                 id = "qwen3-1.7b-q4km",
                 type = ModelType.TEXT,
-                displayName = "Qwen3 1.7B (Q4_K_M)",
+                displayName = "Qwen3 1.7B",
+                role = "Teacher · answers and explains",
                 sizeLabel = "~1.1 GB",
                 licenseName = "Apache 2.0",
                 fileName = "Qwen3-1.7B-Q4_K_M.gguf",
                 downloadUrl = "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf"
             ),
             ModelDefinition(
-                id = "lfm25-vl-450m",
+                id = "florence-2-base",
                 type = ModelType.VISION,
-                displayName = "LFM2.5-VL 450M (Q4_0)",
-                sizeLabel = "~350 MB",
-                licenseName = "LFM Open License",
-                fileName = "LFM2.5-VL-450M-Q4_0.gguf",
-                downloadUrl = "https://huggingface.co/LiquidAI/LFM2.5-VL-450M-GGUF/resolve/main/LFM2.5-VL-450M-Q4_0.gguf",
-                mmprojFileName = "mmproj-LFM2.5-VL-450m-Q8_0.gguf",
-                mmprojUrl = "https://huggingface.co/LiquidAI/LFM2.5-VL-450M-GGUF/resolve/main/mmproj-LFM2.5-VL-450m-Q8_0.gguf"
+                displayName = "Florence-2 Base",
+                role = "Image reader · describes photos and reads text",
+                sizeLabel = "~1.1 GB",
+                licenseName = "MIT",
+                fileName = FlorenceEngine.FILES.first().first,
+                downloadUrl = FlorenceEngine.FILES.first().second,
+                extraFiles = FlorenceEngine.FILES.drop(1)
             ),
             ModelDefinition(
                 id = "whisper-base",
                 type = ModelType.SPEECH,
                 displayName = "Whisper Base",
+                role = "Voice · speech to text",
                 sizeLabel = "~145 MB",
                 licenseName = "MIT",
                 fileName = "ggml-base.bin",
