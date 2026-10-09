@@ -12,8 +12,9 @@ import kotlinx.coroutines.launch
 class ModelsViewModel(app: Application) : AndroidViewModel(app) {
     private val modelManager = (app as LoFiApp).modelManager
 
+    // Only the two StudyMate models are shown. Whisper is hidden until it is built.
     val models: StateFlow<List<ModelDefinition>> =
-        MutableStateFlow(ModelDefinition.BUILTINS).asStateFlow()
+        MutableStateFlow(ModelDefinition.BUILTINS.filter { it.type != ModelType.SPEECH }).asStateFlow()
 
     val status = modelManager.status
     val downloadProgress = modelManager.downloadProgress
