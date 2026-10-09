@@ -122,11 +122,14 @@ bool decode_all(llama_context* lctx, std::vector<llama_token>& toks) {
 
 // Samples after the prompt has already been decoded. Calls on_piece (if set)
 // with each chunk of complete UTF-8 text as soon as it is produced.
-std::string sample_loop(llama_context* lctx, const llama_vocab* vocab, int maxTokens, const PieceFn& on_piece) {
+// A repeat penalty and a repetition guard stop small models from looping.
+std::string sample_loop(llama_context* lctx, const llama_vocab* vocab, int maxTokens,
+                        const PieceFn& on_piece, float temp) {
     llama_sampler* smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
+    llama_sampler_chain_add(smpl, llama_sampler_init_penalties(64, 1.15f, 0.0f, 0.0f));
     llama_sampler_chain_add(smpl, llama_sampler_init_top_k(40));
     llama_sampler_chain_add(smpl, llama_sampler_init_top_p(0.9f, 1));
-    llama_sampler_chain_add(smpl, llama_sampler_init_temp(0.7f));
+    llama_sampler_chain_add(smpl, llama_sampler_init_temp(temp));
     llama_sampler_chain_add(smpl, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
     std::string out, pending;
     bool keep_going = true;
@@ -144,6 +147,11 @@ std::string sample_loop(llama_context* lctx, const llama_vocab* vocab, int maxTo
                 pending.erase(0, k);
                 if (!on_piece(chunk)) keep_going = false;
             }
+        }
+        // stop if the last 60 characters just repeated the 60 before them
+        if (out.size() > 160 && (i % 8 == 0)) {
+            size_t L = out.size();
+            if (out.compare(L - 60, 60, out, L - 120, 60) == 0) break;
         }
         if (llama_decode(lctx, llama_batch_get_one(&tok, 1)) != 0) break;
     }
@@ -178,7 +186,7 @@ jstring run_generate(JNIEnv* env, jlong ptr, jstring prompt, jint maxTokens, job
     llama_memory_clear(llama_get_memory(c->lctx), true);
     if (!decode_all(c->lctx, toks)) { fail(env, "Text model failed to read the prompt."); return nullptr; }
     PieceFn emit = make_emitter(env, cb);
-    return to_jstring(env, sample_loop(c->lctx, vocab, maxTokens, emit));
+    return to_jstring(env, sample_loop(c->lctx, vocab, maxTokens, emit, 0.6f));
 }
 } // namespace
 
@@ -256,13 +264,11 @@ Java_com_manoj_lofi4a_core_NativeBridge_describeImage(JNIEnv* env, jobject, jlon
     int32_t r = -1;
     const char* ctx_marker = mtmd_get_marker(c->mctx);
     const char* markers[2] = { ctx_marker, mtmd_default_marker() };
-    std::string last_sent;
     g_last_log.clear();
     for (const char* marker : markers) {
         if (!marker) continue;
         std::string full = "<|im_start|>user\n" + std::string(marker) + "\n" + pr +
                            "<|im_end|>\n<|im_start|>assistant\n";
-        last_sent = full.substr(0, 70);
         mtmd_input_text txt;
         txt.text = full.c_str();
         txt.add_special = true;
@@ -275,9 +281,7 @@ Java_com_manoj_lofi4a_core_NativeBridge_describeImage(JNIEnv* env, jobject, jlon
     }
     if (r != 0 || !chunks) {
         mtmd_bitmap_free(bmp);
-        std::string diag = std::string(" [build v3] ctx_marker=[") + (ctx_marker ? ctx_marker : "null") +
-                           "] default=[" + mtmd_default_marker() + "] sent=[" + last_sent + "]";
-        fail(env, "Could not process the image (tokenize error " + std::to_string(r) + "). " + g_last_log + diag);
+        fail(env, "Could not process the image (tokenize error " + std::to_string(r) + "). " + g_last_log);
         return nullptr;
     }
 
@@ -289,7 +293,8 @@ Java_com_manoj_lofi4a_core_NativeBridge_describeImage(JNIEnv* env, jobject, jlon
     if (r != 0) { fail(env, "Vision model failed to read the image (error " + std::to_string(r) + ")."); return nullptr; }
 
     const llama_vocab* vocab = llama_model_get_vocab(c->model);
-    return to_jstring(env, sample_loop(c->lctx, vocab, 300, nullptr));
+    // low temperature = factual, fewer made-up details
+    return to_jstring(env, sample_loop(c->lctx, vocab, 200, nullptr, 0.2f));
 }
 
 JNIEXPORT void JNICALL
