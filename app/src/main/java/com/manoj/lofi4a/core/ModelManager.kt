@@ -216,16 +216,64 @@ class ModelManager(private val context: Context) {
         }
     }
 
-    // ---------------- Inference (background threads) ----------------
+    // ---------------- StudyMate AI: persona + memory ----------------
 
     private val systemPrompt =
-        "You are LoFi-4A Core, the main AI assistant in the LoFi model family. " +
-            "You run fully offline on the user's phone. " +
-            "If asked who made you, say you are part of the LoFi model family and do not name any company. " +
-            "Answer clearly and helpfully."
+        "You are StudyMate AI, a friendly and patient teacher who works fully offline on the student's phone. " +
+            "Teach like a good school teacher: use simple words, explain the idea first, give a small example, " +
+            "then check understanding with a short question. " +
+            "For maths sums, solve step by step, show every step on its own line, and state the final answer clearly. " +
+            "When a lesson comes from a book or textbook page, explain it in your own words and point out the key points. " +
+            "Be encouraging and keep answers short unless the student asks for more detail. " +
+            "If asked who you are, say you are StudyMate AI, an offline study buddy made to help students learn. " +
+            "Never say you are Gemma or that any company made you; if asked what you are built on, " +
+            "say you are built on open base models and set up specially as a teacher."
 
-    private fun gemmaPrompt(user: String) =
-        "<start_of_turn>user\n$systemPrompt\n\n$user<end_of_turn>\n<start_of_turn>model\n"
+    // (student message, StudyMate reply) pairs, oldest first
+    private val history = mutableListOf<Pair<String, String>>()
+
+    // What the vision model last saw, remembered so follow-up questions work
+    @Volatile private var imageContext: String? = null
+
+    fun newChat() {
+        synchronized(history) { history.clear() }
+        imageContext = null
+    }
+
+    /** Builds a Gemma chat prompt: persona + (optional) image notes + recent turns + new message. */
+    private fun buildPrompt(userMsg: String): String {
+        val sys = StringBuilder(systemPrompt)
+        imageContext?.let {
+            sys.append("\n\nThe student shared an image. A small vision model described it like this ")
+                .append("(it can make mistakes and cannot count small details reliably):\n")
+                .append(it.take(1200))
+        }
+        val turns = synchronized(history) { history.toList() }
+        var budget = 5000 - sys.length - userMsg.length
+        val kept = ArrayDeque<Pair<String, String>>()
+        for (t in turns.asReversed()) {
+            val cost = t.first.length + t.second.length
+            if (cost > budget) break
+            budget -= cost
+            kept.addFirst(t)
+        }
+        val sb = StringBuilder()
+        var sysPending: String? = sys.toString()
+        fun addUser(text: String) {
+            sb.append("<start_of_turn>user\n")
+            sysPending?.let { sb.append(it).append("\n\n"); sysPending = null }
+            sb.append(text).append("<end_of_turn>\n")
+        }
+        for ((u, a) in kept) {
+            addUser(u)
+            sb.append("<start_of_turn>model\n").append(a).append("<end_of_turn>\n")
+        }
+        addUser(userMsg)
+        sb.append("<start_of_turn>model\n")
+        return sb.toString()
+    }
+
+    // ---------------- Inference (background threads) ----------------
 
     private suspend fun ensureLoaded(type: ModelType) {
         val loaded = when (type) {
@@ -235,23 +283,36 @@ class ModelManager(private val context: Context) {
         } != 0L
         if (loaded) return
         val def = ModelDefinition.BUILTINS.first { it.type == type }
-        if (!isDownloaded(def)) error("${def.displayName} is not downloaded. Open Models and download it.")
+        if (!isDownloaded(def)) error("${def.displayName} is not downloaded. Open Models (⚙️) and download it.")
         load(def).getOrThrow()
     }
 
-    /** Streams Gemma's answer: onToken is called with each piece as it is generated. */
+    private fun streamAnswer(userMsg: String, historyText: String, onToken: (String) -> Unit): String {
+        val reply = NativeBridge.generateStream(
+            textCtx, buildPrompt(userMsg), 512,
+            TokenCallback { piece -> onToken(piece); true }
+        ).trim()
+        if (reply.isNotEmpty()) synchronized(history) { history.add(historyText to reply) }
+        return reply
+    }
+
+    /** Streams StudyMate's answer: onToken is called with each piece as it is generated. */
     suspend fun generateTextStream(prompt: String, onToken: (String) -> Unit): String =
         withContext(Dispatchers.Default) {
             ensureLoaded(ModelType.TEXT)
-            NativeBridge.generateStream(
-                textCtx, gemmaPrompt(prompt), 512,
-                TokenCallback { piece -> onToken(piece); true }
-            )
+            streamAnswer(prompt, prompt, onToken)
         }
 
+    /** Removes the repeated lines small vision models sometimes produce. */
+    private fun cleanSeen(raw: String): String {
+        val unique = LinkedHashSet<String>()
+        raw.lines().map { it.trim() }.filter { it.isNotBlank() }.forEach { unique.add(it) }
+        return unique.joinToString("\n").take(1200)
+    }
+
     /**
-     * Pipeline: LFM2.5-VL looks at the image (onSeen gets its description),
-     * then Gemma streams the final answer.
+     * Pipeline: LFM2.5-VL looks at the image (onSeen gets what it saw),
+     * then StudyMate (Gemma) explains it like a teacher and streams the answer.
      */
     suspend fun analyzeImageStream(
         imagePath: String,
@@ -260,23 +321,25 @@ class ModelManager(private val context: Context) {
         onToken: (String) -> Unit
     ): String = withContext(Dispatchers.Default) {
         ensureLoaded(ModelType.VISION)
-        val seen = NativeBridge.describeImage(
-            visionCtx, imagePath,
-            "Describe this image in detail. Include any visible text, objects, people, colors and the setting."
-        )
+        val visionPrompt = if (question.isBlank()) {
+            "Describe this image factually in 4 to 6 sentences. " +
+                "If it contains text, numbers, equations or a book page, read them exactly."
+        } else {
+            "Look at this image and answer using only what is visible. " +
+                "If it contains text, numbers or equations, read them exactly.\nQuestion: $question"
+        }
+        val raw = NativeBridge.describeImage(visionCtx, imagePath, visionPrompt)
         unload(ModelType.VISION) // free RAM before loading Gemma
+        val seen = cleanSeen(raw)
         if (seen.isBlank()) error("The vision model returned nothing.")
+        imageContext = seen
         onSeen(seen)
         ensureLoaded(ModelType.TEXT)
-        val ask = if (question.isBlank()) "Explain what is in this image." else question
-        NativeBridge.generateStream(
-            textCtx,
-            gemmaPrompt(
-                "A vision model looked at an image the user shared and described it like this:\n\n" +
-                    "$seen\n\nUsing only that description, respond to the user's request: $ask"
-            ),
-            512,
-            TokenCallback { piece -> onToken(piece); true }
+        val ask = if (question.isBlank()) "Please explain what is in my image like a teacher." else question
+        streamAnswer(
+            "$ask\n(Use the image notes above. If they don't show the answer, say honestly what you can't tell.)",
+            "[shared an image] $ask",
+            onToken
         )
     }
 
