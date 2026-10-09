@@ -16,13 +16,13 @@ data class ModelDefinition(
     companion object {
         val BUILTINS = listOf(
             ModelDefinition(
-                id = "gemma3-1b-q4km",
+                id = "qwen3-1.7b-q4km",
                 type = ModelType.TEXT,
-                displayName = "Gemma 3 1B Instruct (Q4_K_M)",
-                sizeLabel = "~806 MB",
-                licenseName = "Gemma Terms of Use",
-                fileName = "gemma-3-1b-it-Q4_K_M.gguf",
-                downloadUrl = "https://huggingface.co/unsloth/gemma-3-1b-it-GGUF/resolve/main/gemma-3-1b-it-Q4_K_M.gguf"
+                displayName = "Qwen3 1.7B (Q4_K_M)",
+                sizeLabel = "~1.1 GB",
+                licenseName = "Apache 2.0",
+                fileName = "Qwen3-1.7B-Q4_K_M.gguf",
+                downloadUrl = "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf"
             ),
             ModelDefinition(
                 id = "lfm25-vl-450m",
