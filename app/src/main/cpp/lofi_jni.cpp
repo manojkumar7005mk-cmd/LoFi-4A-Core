@@ -126,8 +126,8 @@ bool decode_all(llama_context* lctx, std::vector<llama_token>& toks) {
 std::string sample_loop(llama_context* lctx, const llama_vocab* vocab, int maxTokens,
                         const PieceFn& on_piece, float temp) {
     llama_sampler* smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
-llama_sampler_chain_add(smpl, llama_sampler_init_top_k(20));
-llama_sampler_chain_add(smpl, llama_sampler_init_top_p(0.8f, 1));
+    llama_sampler_chain_add(smpl, llama_sampler_init_top_k(20));
+    llama_sampler_chain_add(smpl, llama_sampler_init_top_p(0.8f, 1));
     llama_sampler_chain_add(smpl, llama_sampler_init_temp(temp));
     llama_sampler_chain_add(smpl, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
     const int n_vocab = llama_vocab_n_tokens(vocab);
@@ -203,7 +203,7 @@ jstring run_generate(JNIEnv* env, jlong ptr, jstring prompt, jint maxTokens, job
     llama_memory_clear(llama_get_memory(c->lctx), true);
     if (!decode_all(c->lctx, toks)) { fail(env, "Text model failed to read the prompt."); return nullptr; }
     PieceFn emit = make_emitter(env, cb);
-    return to_jstring(env, sample_loop(c->lctx, vocab, maxTokens, emit, 0.6f));
+        return to_jstring(env, sample_loop(c->lctx, vocab, maxTokens, emit, 0.7f));
 }
 } // namespace
 
@@ -320,7 +320,7 @@ Java_com_manoj_lofi4a_core_NativeBridge_describeImage(JNIEnv* env, jobject, jlon
 
     const llama_vocab* vocab = llama_model_get_vocab(c->model);
     // low temperature = factual, fewer made-up details
-    return to_jstring(env, sample_loop(c->lctx, vocab, maxTokens, emit, 0.7f));
+     return to_jstring(env, sample_loop(c->lctx, vocab, 200, nullptr, 0.2f));
 }
 
 JNIEXPORT void JNICALL
