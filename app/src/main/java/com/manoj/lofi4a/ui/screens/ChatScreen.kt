@@ -1,4 +1,4 @@
-package com.manoj.lofi4a.ui.screens
+ package com.manoj.lofi4a.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -8,11 +8,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -25,13 +24,12 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -42,15 +40,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.manoj.lofi4a.core.WavRecorder
 import com.manoj.lofi4a.ui.Routes
 import com.manoj.lofi4a.ui.chat.ChatMessage
 import com.manoj.lofi4a.ui.chat.ChatViewModel
-import com.manoj.lofi4a.ui.theme.StudyBlue
-import com.manoj.lofi4a.ui.theme.StudyViolet
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -93,7 +88,6 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
         ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri != null) {
-            // Shrink big phone photos to max ~1536px and save as a clean JPEG.
             val f = File(context.cacheDir, "picked_image.jpg")
             try {
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -107,10 +101,7 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
                     BitmapFactory.decodeStream(it, null, opts)
                 }
                 if (bmp != null) {
-                    f.outputStream().use { o ->
-                        bmp.compress(Bitmap.CompressFormat.JPEG, 90, o)
-                    }
-                    // small preview for the attachment strip
+                    f.outputStream().use { o -> bmp.compress(Bitmap.CompressFormat.JPEG, 90, o) }
                     val scale = 160f / maxOf(bmp.width, bmp.height)
                     pendingThumb = Bitmap.createScaledBitmap(
                         bmp,
@@ -118,19 +109,17 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
                         (bmp.height * scale).toInt().coerceAtLeast(1),
                         true
                     )
-                    pendingImage = File(f.absolutePath)
+                    pendingImage = f
                 }
             } catch (e: Exception) {
             }
         }
     }
 
-    // Keep the screen following the newest words while the answer streams in.
     LaunchedEffect(messages.size, messages.lastOrNull()?.text?.length) {
         if (messages.isNotEmpty()) listState.scrollToItem(messages.size - 1, 100000)
     }
 
-    // Sends the text, and the waiting photo together with it (if there is one).
     val sendNow: () -> Unit = {
         val img = pendingImage
         val prompt = input.trim()
@@ -146,20 +135,38 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
         }
     }
 
+    val statusLine = buildString {
+        append(if (textLoaded) "Qwen3 1.7B · Ready" else "Qwen3 1.7B · Not loaded")
+        if (offline) append(" · Offline")
+    }
+
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            StudyHeader(
-                offline = offline,
-                textLoaded = textLoaded,
-                generating = generating,
-                onNewChat = { vm.newChat() },
-                onModels = { onNavigate(Routes.MODELS) },
-                onAbout = { onNavigate(Routes.ABOUT) }
+            TopAppBar(
+                title = {
+                    Column {
+                        Text("StudyMate", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            statusLine,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { vm.newChat() }, enabled = !generating) {
+                        Icon(Icons.Default.Refresh, contentDescription = "New chat")
+                    }
+                    IconButton(onClick = { onNavigate(Routes.MODELS) }) {
+                        Icon(Icons.Default.Settings, contentDescription = "Models")
+                    }
+                    IconButton(onClick = { onNavigate(Routes.ABOUT) }) {
+                        Icon(Icons.Default.Info, contentDescription = "About")
+                    }
+                }
             )
         }
     ) { padding ->
-        // imePadding() lifts the whole column (and the message box) above the keyboard.
         Column(
             modifier = Modifier
                 .padding(padding)
@@ -170,33 +177,44 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                items(messages) { msg ->
-                    ChatBubble(msg)
+                itemsIndexed(messages) { index, msg ->
+                    val thinking = generating &&
+                        index == messages.lastIndex &&
+                        !msg.isUser &&
+                        msg.text.isBlank()
+                    MessageRow(msg, thinking)
                 }
             }
 
-            if (messages.size <= 1 && pendingImage == null) {
+            if (messages.size <= 1 && !generating) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    StudyChip("📘 Explain a lesson") { input = "Explain this lesson in simple words: " }
-                    StudyChip("➗ Solve a sum") { input = "Solve this sum step by step: " }
-                    StudyChip("📷 Read a book page") { imagePicker.launch("image/*") }
+                    SuggestionChip(
+                        onClick = { input = "Explain this lesson simply: " },
+                        label = { Text("Explain a lesson") }
+                    )
+                    SuggestionChip(
+                        onClick = { input = "Solve step by step: " },
+                        label = { Text("Solve a maths sum") }
+                    )
+                    SuggestionChip(
+                        onClick = { imagePicker.launch("image/*") },
+                        label = { Text("Read a book page") }
+                    )
                 }
             }
 
-            // Bottom bar: attached-photo preview + message box
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 tonalElevation = 3.dp,
-                shadowElevation = 6.dp,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column {
@@ -204,32 +222,34 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Image(
                                 bitmap = thumb.asImageBitmap(),
                                 contentDescription = "Attached image",
                                 contentScale = ContentScale.Crop,
-                                modifier = Modifier.size(64.dp).clip(RoundedCornerShape(12.dp))
+                                modifier = Modifier.size(56.dp).clip(RoundedCornerShape(10.dp))
                             )
-                            Spacer(Modifier.width(10.dp))
+                            Spacer(Modifier.width(12.dp))
                             Text(
-                                "Image attached. Type your question, then press send.",
+                                "Image ready. Ask a question or press send.",
                                 style = MaterialTheme.typography.bodySmall,
                                 modifier = Modifier.weight(1f)
                             )
-                            IconButton(onClick = {
+                            TextButton(onClick = {
                                 pendingImage = null
                                 pendingThumb = null
                             }) {
-                                Text("✕", style = MaterialTheme.typography.titleMedium)
+                                Text("Remove")
                             }
                         }
                     }
 
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.Bottom
                     ) {
                         IconButton(
@@ -257,45 +277,37 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
                         ) {
                             Text(if (recording) "⏹️" else "🎤", style = MaterialTheme.typography.titleLarge)
                         }
+
                         OutlinedTextField(
                             value = input,
                             onValueChange = { input = it },
                             modifier = Modifier.weight(1f),
                             placeholder = {
-                                Text(
-                                    if (pendingImage != null) "Ask about this image…"
-                                    else "Ask doubt or paste equation…"
-                                )
+                                Text(if (pendingImage != null) "Ask about this image" else "Message StudyMate")
                             },
-                            shape = RoundedCornerShape(28.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = StudyBlue,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                                focusedContainerColor = MaterialTheme.colorScheme.background,
-                                unfocusedContainerColor = MaterialTheme.colorScheme.background
-                            ),
-                            maxLines = 5,
-                            enabled = !generating,
+                            shape = RoundedCornerShape(26.dp),
+                            maxLines = 6,
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                             keyboardActions = KeyboardActions(onSend = { sendNow() })
                         )
-                        Spacer(Modifier.width(6.dp))
-                        IconButton(
-                            onClick = { sendNow() },
-                            enabled = !generating && (input.isNotBlank() || pendingImage != null),
-                            colors = IconButtonDefaults.iconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.primary,
-                                contentColor = MaterialTheme.colorScheme.onPrimary,
-                                disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        ) {
-                            if (generating) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(22.dp),
-                                    strokeWidth = 2.dp
+
+                        Spacer(Modifier.width(8.dp))
+
+                        if (generating) {
+                            FilledIconButton(
+                                onClick = { vm.stop() },
+                                colors = IconButtonDefaults.filledIconButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.error,
+                                    contentColor = MaterialTheme.colorScheme.onError
                                 )
-                            } else {
+                            ) {
+                                Icon(Icons.Default.Stop, contentDescription = "Stop")
+                            }
+                        } else {
+                            FilledIconButton(
+                                onClick = { sendNow() },
+                                enabled = input.isNotBlank() || pendingImage != null
+                            ) {
                                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
                             }
                         }
@@ -306,7 +318,49 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
     }
 }
 
-/** Turns the simple markdown the model writes (**bold**, * bullets, # headings) into styled text. */
+@Composable
+private fun MessageRow(msg: ChatMessage, thinking: Boolean) {
+    if (msg.isUser) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                modifier = Modifier.widthIn(max = 300.dp)
+            ) {
+                SelectionContainer {
+                    Text(
+                        msg.text,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                    )
+                }
+            }
+        }
+    } else {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("S", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.width(12.dp))
+            SelectionContainer(modifier = Modifier.weight(1f)) {
+                Text(
+                    if (thinking) AnnotatedString("Thinking…") else renderMarkdown(msg.text),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (thinking) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
+    }
+}
+
+/** Turns simple markdown (**bold**, bullets, # headings) into styled text. */
 private fun renderMarkdown(text: String): AnnotatedString = buildAnnotatedString {
     val lines = text.split("\n")
     lines.forEachIndexed { index, raw ->
@@ -321,146 +375,5 @@ private fun renderMarkdown(text: String): AnnotatedString = buildAnnotatedString
             }
         }
         if (index < lines.lastIndex) append("\n")
-    }
-}
-
-@Composable
-private fun StudyChip(label: String, onClick: () -> Unit) {
-    AssistChip(
-        onClick = onClick,
-        label = { Text(label, fontWeight = FontWeight.Medium) },
-        shape = RoundedCornerShape(50),
-        colors = AssistChipDefaults.assistChipColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            labelColor = MaterialTheme.colorScheme.onPrimaryContainer
-        ),
-        border = null
-    )
-}
-
-/** Blue-to-violet header from the Stitch design: logo, title, local-AI status chip, actions. */
-@Composable
-private fun StudyHeader(
-    offline: Boolean,
-    textLoaded: Boolean,
-    generating: Boolean,
-    onNewChat: () -> Unit,
-    onModels: () -> Unit,
-    onAbout: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Brush.horizontalGradient(listOf(StudyBlue, StudyViolet)))
-            .statusBarsPadding()
-            .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 12.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier.size(40.dp).clip(CircleShape).background(Color.White),
-                contentAlignment = Alignment.Center
-            ) { Text("📘", fontSize = 22.sp) }
-            Spacer(Modifier.width(10.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text("StudyMate", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                Text(
-                    if (offline) "Learn • Offline ready" else "Learn • Local AI",
-                    color = Color.White.copy(alpha = 0.85f),
-                    style = MaterialTheme.typography.labelMedium
-                )
-            }
-            IconButton(onClick = onNewChat, enabled = !generating) {
-                Icon(Icons.Default.Refresh, contentDescription = "New chat", tint = Color.White)
-            }
-            IconButton(onClick = onModels) {
-                Icon(Icons.Default.Settings, contentDescription = "Models", tint = Color.White)
-            }
-            IconButton(onClick = onAbout) {
-                Icon(Icons.Default.Info, contentDescription = "About", tint = Color.White)
-            }
-        }
-        Spacer(Modifier.height(10.dp))
-        // status chip: which model is answering and whether it is in memory
-        Surface(shape = RoundedCornerShape(50), color = Color.White.copy(alpha = 0.18f)) {
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(if (textLoaded) Color(0xFF4EDEA3) else Color(0xFFFFB95C))
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    "Qwen3 1.7B • " + if (textLoaded) "Ready" else "Loads on first question",
-                    color = Color.White,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun ChatBubble(msg: ChatMessage) {
-    val content = remember(msg.text) {
-        renderMarkdown(if (msg.text.isBlank()) "…" else msg.text)
-    }
-    val isUser = msg.isUser
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
-    ) {
-        if (!isUser) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)) {
-                Box(
-                    modifier = Modifier
-                        .size(22.dp)
-                        .clip(CircleShape)
-                        .background(Brush.linearGradient(listOf(StudyViolet, StudyBlue))),
-                    contentAlignment = Alignment.Center
-                ) { Text("✨", fontSize = 11.sp) }
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    "StudyMate AI Tutor",
-                    color = StudyViolet,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    "  • local",
-                    color = MaterialTheme.colorScheme.outline,
-                    style = MaterialTheme.typography.labelSmall
-                )
-            }
-        }
-        Surface(
-            shape = RoundedCornerShape(
-                topStart = 20.dp,
-                topEnd = 20.dp,
-                bottomStart = if (isUser) 20.dp else 4.dp,
-                bottomEnd = if (isUser) 4.dp else 20.dp
-            ),
-            color = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
-            shadowElevation = if (isUser) 0.dp else 1.dp,
-            modifier = Modifier
-                .widthIn(max = 320.dp)
-                .then(
-                    if (isUser) Modifier
-                    else Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(20.dp))
-                )
-        ) {
-            SelectionContainer {
-                Text(
-                    content,
-                    color = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                    lineHeight = 22.sp,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
-                )
-            }
-        }
     }
 }
