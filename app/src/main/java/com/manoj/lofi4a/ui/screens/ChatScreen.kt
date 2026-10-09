@@ -8,6 +8,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -29,6 +30,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -39,12 +42,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.manoj.lofi4a.core.WavRecorder
 import com.manoj.lofi4a.ui.Routes
 import com.manoj.lofi4a.ui.chat.ChatMessage
 import com.manoj.lofi4a.ui.chat.ChatViewModel
+import com.manoj.lofi4a.ui.theme.StudyBlue
+import com.manoj.lofi4a.ui.theme.StudyViolet
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -53,6 +59,7 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
     val messages by vm.messages.collectAsState()
     val generating by vm.generating.collectAsState()
     val offline by vm.offline.collectAsState()
+    val textLoaded by vm.textModelLoaded.collectAsState()
     var input by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
@@ -140,41 +147,15 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("🎓 StudyMate AI", fontWeight = FontWeight.Bold)
-                        Text(
-                            "your offline study buddy",
-                            style = MaterialTheme.typography.labelSmall
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    actionIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                ),
-                actions = {
-                    if (offline) {
-                        Text(
-                            "Offline",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.padding(end = 8.dp)
-                        )
-                    }
-                    IconButton(onClick = { vm.newChat() }, enabled = !generating) {
-                        Icon(Icons.Default.Refresh, contentDescription = "New chat")
-                    }
-                    IconButton(onClick = { onNavigate(Routes.MODELS) }) {
-                        Icon(Icons.Default.Settings, contentDescription = "Models")
-                    }
-                    IconButton(onClick = { onNavigate(Routes.ABOUT) }) {
-                        Icon(Icons.Default.Info, contentDescription = "About")
-                    }
-                }
+            StudyHeader(
+                offline = offline,
+                textLoaded = textLoaded,
+                generating = generating,
+                onNewChat = { vm.newChat() },
+                onModels = { onNavigate(Routes.MODELS) },
+                onAbout = { onNavigate(Routes.ABOUT) }
             )
         }
     ) { padding ->
@@ -205,23 +186,19 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
                         .padding(horizontal = 10.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    AssistChip(
-                        onClick = { input = "Explain this lesson in simple words: " },
-                        label = { Text("📘 Explain a lesson") }
-                    )
-                    AssistChip(
-                        onClick = { input = "Solve this sum step by step: " },
-                        label = { Text("➗ Solve a sum") }
-                    )
-                    AssistChip(
-                        onClick = { imagePicker.launch("image/*") },
-                        label = { Text("📷 Read a book page") }
-                    )
+                    StudyChip("📘 Explain a lesson") { input = "Explain this lesson in simple words: " }
+                    StudyChip("➗ Solve a sum") { input = "Solve this sum step by step: " }
+                    StudyChip("📷 Read a book page") { imagePicker.launch("image/*") }
                 }
             }
 
             // Bottom bar: attached-photo preview + message box
-            Surface(tonalElevation = 3.dp, modifier = Modifier.fillMaxWidth()) {
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 3.dp,
+                shadowElevation = 6.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
                 Column {
                     pendingThumb?.let { thumb ->
                         Row(
@@ -287,10 +264,16 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
                             placeholder = {
                                 Text(
                                     if (pendingImage != null) "Ask about this image…"
-                                    else "Ask StudyMate anything…"
+                                    else "Ask doubt or paste equation…"
                                 )
                             },
-                            shape = RoundedCornerShape(24.dp),
+                            shape = RoundedCornerShape(28.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = StudyBlue,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                                focusedContainerColor = MaterialTheme.colorScheme.background,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.background
+                            ),
                             maxLines = 5,
                             enabled = !generating,
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
@@ -342,45 +325,140 @@ private fun renderMarkdown(text: String): AnnotatedString = buildAnnotatedString
 }
 
 @Composable
+private fun StudyChip(label: String, onClick: () -> Unit) {
+    AssistChip(
+        onClick = onClick,
+        label = { Text(label, fontWeight = FontWeight.Medium) },
+        shape = RoundedCornerShape(50),
+        colors = AssistChipDefaults.assistChipColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            labelColor = MaterialTheme.colorScheme.onPrimaryContainer
+        ),
+        border = null
+    )
+}
+
+/** Blue-to-violet header from the Stitch design: logo, title, local-AI status chip, actions. */
+@Composable
+private fun StudyHeader(
+    offline: Boolean,
+    textLoaded: Boolean,
+    generating: Boolean,
+    onNewChat: () -> Unit,
+    onModels: () -> Unit,
+    onAbout: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Brush.horizontalGradient(listOf(StudyBlue, StudyViolet)))
+            .statusBarsPadding()
+            .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier.size(40.dp).clip(CircleShape).background(Color.White),
+                contentAlignment = Alignment.Center
+            ) { Text("📘", fontSize = 22.sp) }
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("StudyMate", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                Text(
+                    if (offline) "Learn • Offline ready" else "Learn • Local AI",
+                    color = Color.White.copy(alpha = 0.85f),
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
+            IconButton(onClick = onNewChat, enabled = !generating) {
+                Icon(Icons.Default.Refresh, contentDescription = "New chat", tint = Color.White)
+            }
+            IconButton(onClick = onModels) {
+                Icon(Icons.Default.Settings, contentDescription = "Models", tint = Color.White)
+            }
+            IconButton(onClick = onAbout) {
+                Icon(Icons.Default.Info, contentDescription = "About", tint = Color.White)
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        // status chip: which model is answering and whether it is in memory
+        Surface(shape = RoundedCornerShape(50), color = Color.White.copy(alpha = 0.18f)) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(if (textLoaded) Color(0xFF4EDEA3) else Color(0xFFFFB95C))
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Qwen3 1.7B • " + if (textLoaded) "Ready" else "Loads on first question",
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun ChatBubble(msg: ChatMessage) {
     val content = remember(msg.text) {
         renderMarkdown(if (msg.text.isBlank()) "…" else msg.text)
     }
     val isUser = msg.isUser
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
-        verticalAlignment = Alignment.Top
+        horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
     ) {
         if (!isUser) {
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("🎓")
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(22.dp)
+                        .clip(CircleShape)
+                        .background(Brush.linearGradient(listOf(StudyViolet, StudyBlue))),
+                    contentAlignment = Alignment.Center
+                ) { Text("✨", fontSize = 11.sp) }
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "StudyMate AI Tutor",
+                    color = StudyViolet,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    "  • local",
+                    color = MaterialTheme.colorScheme.outline,
+                    style = MaterialTheme.typography.labelSmall
+                )
             }
-            Spacer(Modifier.width(6.dp))
         }
         Surface(
             shape = RoundedCornerShape(
-                topStart = if (isUser) 18.dp else 4.dp,
-                topEnd = if (isUser) 4.dp else 18.dp,
-                bottomStart = 18.dp,
-                bottomEnd = 18.dp
+                topStart = 20.dp,
+                topEnd = 20.dp,
+                bottomStart = if (isUser) 20.dp else 4.dp,
+                bottomEnd = if (isUser) 4.dp else 20.dp
             ),
-            color = if (isUser) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.surfaceVariant,
-            modifier = Modifier.widthIn(max = 300.dp)
+            color = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+            shadowElevation = if (isUser) 0.dp else 1.dp,
+            modifier = Modifier
+                .widthIn(max = 320.dp)
+                .then(
+                    if (isUser) Modifier
+                    else Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(20.dp))
+                )
         ) {
             SelectionContainer {
                 Text(
                     content,
-                    color = if (isUser) MaterialTheme.colorScheme.onPrimary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                    color = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                    lineHeight = 22.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
                 )
             }
         }
