@@ -12,10 +12,14 @@ import kotlinx.coroutines.withContext
 
 data class ChatMessage(val text: String, val isUser: Boolean)
 
+private const val WELCOME =
+    "Hi! I'm StudyMate AI 👋 your friendly offline study buddy.\n\n" +
+        "Ask me to explain a lesson, solve a sum step by step, or tap 🖼️ to share a page from your book."
+
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val modelManager = (app as LoFiApp).modelManager
 
-    private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
+    private val _messages = MutableStateFlow(listOf(ChatMessage(WELCOME, false)))
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
 
     private val _generating = MutableStateFlow(false)
@@ -62,8 +66,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Starts a fresh conversation (clears StudyMate's memory too). */
+    fun newChat() {
+        if (_generating.value) return
+        modelManager.newChat()
+        _messages.value = listOf(ChatMessage(WELCOME, false))
+    }
+
     fun send(prompt: String) {
-        if (prompt.isBlank()) return
+        if (prompt.isBlank() || _generating.value) return
         addMessage(prompt, isUser = true)
         addMessage("", isUser = false) // bubble that fills in as tokens arrive
         _generating.value = true
@@ -78,8 +89,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** LFM2.5-VL looks at the image, then Gemma streams the answer. */
+    /** LFM2.5-VL looks at the image, then StudyMate (Gemma) explains and streams the answer. */
     fun describeImage(imagePath: String, question: String = "") {
+        if (_generating.value) return
         addMessage(if (question.isBlank()) "🖼️ Image attached" else "🖼️ $question", isUser = true)
         addMessage("🔍 Looking at the image…", isUser = false)
         _generating.value = true
@@ -88,9 +100,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 modelManager.analyzeImageStream(
                     imagePath, question,
                     onSeen = { seen ->
-                        // replace the "Looking…" bubble with what LFM saw, then start Gemma's bubble
+                        // replace the "Looking…" bubble with what LFM saw, then start the answer bubble
                         _messages.update { list ->
-                            list.dropLast(1) + ChatMessage("👁️ LFM saw: $seen", false) + ChatMessage("", false)
+                            list.dropLast(1) +
+                                ChatMessage("👁️ What I could see:\n$seen", false) +
+                                ChatMessage("", false)
                         }
                     },
                     onToken = { appendToLast(it) }
