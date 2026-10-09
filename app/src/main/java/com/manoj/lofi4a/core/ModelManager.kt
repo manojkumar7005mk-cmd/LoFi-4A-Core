@@ -30,9 +30,9 @@ class ModelManager(private val context: Context) {
     private val _offline = MutableStateFlow(false)
     val offline: StateFlow<Boolean> = _offline.asStateFlow()
 
-    // Native context handles; 0 = unloaded
+    // Loaded engines; 0 / null = unloaded
     private var textCtx: Long = 0
-    private var visionCtx: Long = 0
+    private var florence: FlorenceEngine? = null
     private var speechCtx: Long = 0
 
     @Volatile private var stopRequested = false
@@ -41,10 +41,29 @@ class ModelManager(private val context: Context) {
     private val loadLock = Any()
 
     init {
-        // Remove the old Gemma file (if an earlier version downloaded it) to free ~800 MB.
-        File(modelsDir, "gemma-3-1b-it-Q4_K_M.gguf").delete()
+        cleanupOldFiles()
         refreshStatuses()
         monitorConnectivity()
+    }
+
+    /** Frees space from models earlier versions used, and reuses Florence files already downloaded. */
+    private fun cleanupOldFiles() {
+        listOf(
+            "gemma-3-1b-it-Q4_K_M.gguf",
+            "LFM2.5-VL-450M-Q4_0.gguf",
+            "mmproj-LFM2.5-VL-450m-Q8_0.gguf"
+        ).forEach { File(modelsDir, it).delete() }
+
+        val oldDir = File(context.filesDir, "florence")
+        if (oldDir.exists()) {
+            val newDir = File(modelsDir, "florence").apply { mkdirs() }
+            listOf("vision_encoder.onnx", "embed_tokens.onnx", "encoder_model.onnx").forEach { name ->
+                val from = File(oldDir, name)
+                val to = File(newDir, name)
+                if (from.exists() && !to.exists()) from.renameTo(to)
+            }
+            oldDir.deleteRecursively()
+        }
     }
 
     fun modelFile(def: ModelDefinition): File = File(modelsDir, def.fileName)
@@ -53,7 +72,9 @@ class ModelManager(private val context: Context) {
         def.mmprojFileName?.let { File(modelsDir, it) }
 
     fun isDownloaded(def: ModelDefinition): Boolean =
-        modelFile(def).exists() && (mmprojFile(def)?.exists() ?: true)
+        modelFile(def).exists() &&
+            (mmprojFile(def)?.exists() ?: true) &&
+            def.extraFiles.all { File(modelsDir, it.first).exists() }
 
     private fun toast(msg: String) {
         Handler(Looper.getMainLooper()).post {
@@ -70,12 +91,12 @@ class ModelManager(private val context: Context) {
     }
 
     private fun stateFor(type: ModelType): ModelState {
-        val handle = when (type) {
-            ModelType.TEXT -> textCtx
-            ModelType.VISION -> visionCtx
-            ModelType.SPEECH -> speechCtx
+        val loaded = when (type) {
+            ModelType.TEXT -> textCtx != 0L
+            ModelType.VISION -> florence != null
+            ModelType.SPEECH -> speechCtx != 0L
         }
-        if (handle != 0L) return ModelState.LOADED
+        if (loaded) return ModelState.LOADED
         val def = ModelDefinition.BUILTINS.first { it.type == type }
         return if (isDownloaded(def)) ModelState.DOWNLOADED else ModelState.NOT_DOWNLOADED
     }
@@ -93,6 +114,7 @@ class ModelManager(private val context: Context) {
                 val projUrl = def.mmprojUrl
                 val projFile = mmprojFile(def)
                 if (projUrl != null && projFile != null) files.add(projUrl to projFile)
+                def.extraFiles.forEach { files.add(it.second to File(modelsDir, it.first)) }
 
                 files.forEachIndexed { index, pair ->
                     val url = pair.first
@@ -116,6 +138,7 @@ class ModelManager(private val context: Context) {
     }
 
     private fun downloadFile(urlStr: String, dest: File, onProgress: (Float) -> Unit) {
+        dest.parentFile?.mkdirs()
         val tmp = File(dest.parentFile, dest.name + ".part")
         val conn = URL(urlStr).openConnection() as HttpURLConnection
         conn.connectTimeout = 15000
@@ -123,7 +146,7 @@ class ModelManager(private val context: Context) {
         conn.instanceFollowRedirects = true
         try {
             val code = conn.responseCode
-            if (code !in 200..299) throw IOException("HTTP $code")
+            if (code !in 200..299) throw IOException("HTTP $code for ${dest.name}")
             val length = conn.contentLengthLong
             conn.inputStream.use { input ->
                 tmp.outputStream().use { output ->
@@ -175,10 +198,7 @@ class ModelManager(private val context: Context) {
                     }
                     ModelType.VISION -> {
                         unloadLocked(ModelType.VISION)
-                        val proj = mmprojFile(def) ?: error("No projector file for ${def.displayName}")
-                        visionCtx = NativeBridge.loadVisionModel(
-                            modelFile(def).absolutePath, proj.absolutePath
-                        )
+                        florence = FlorenceEngine(File(modelsDir, "florence"))
                     }
                     ModelType.SPEECH -> {
                         unloadLocked(ModelType.SPEECH)
@@ -205,7 +225,7 @@ class ModelManager(private val context: Context) {
     private fun unloadLocked(type: ModelType) {
         when (type) {
             ModelType.TEXT -> { if (textCtx != 0L) NativeBridge.unloadTextModel(textCtx); textCtx = 0 }
-            ModelType.VISION -> { if (visionCtx != 0L) NativeBridge.unloadVisionModel(visionCtx); visionCtx = 0 }
+            ModelType.VISION -> { florence?.close(); florence = null }
             ModelType.SPEECH -> { if (speechCtx != 0L) NativeBridge.unloadSpeechModel(speechCtx); speechCtx = 0 }
         }
     }
@@ -215,7 +235,8 @@ class ModelManager(private val context: Context) {
         scope.launch {
             synchronized(loadLock) {
                 NativeBridge.freeAll()
-                textCtx = 0; visionCtx = 0; speechCtx = 0
+                florence?.close()
+                textCtx = 0; florence = null; speechCtx = 0
                 refreshStatuses()
             }
         }
@@ -237,7 +258,7 @@ class ModelManager(private val context: Context) {
     // (student message, StudyMate reply) pairs, oldest first
     private val history = mutableListOf<Pair<String, String>>()
 
-    // What the vision model last saw, remembered so follow-up questions work
+    // What the image reader last saw, remembered so follow-up questions work
     @Volatile private var imageContext: String? = null
 
     fun newChat() {
@@ -247,15 +268,14 @@ class ModelManager(private val context: Context) {
 
     /**
      * Builds a Qwen3 (ChatML) prompt: system persona (+ optional image notes) + recent turns + new message.
-     * Qwen3 "thinking" is switched off by pre-filling an empty <think></think> block, so the student
-     * gets a direct answer instead of long hidden reasoning (faster on a phone).
+     * Qwen3 "thinking" is switched off by pre-filling an empty <think></think> block.
      */
     private fun buildPrompt(userMsg: String): String {
         val sys = StringBuilder(systemPrompt)
         imageContext?.let {
-            sys.append("\n\nThe student shared an image. A small vision model described it like this ")
-                .append("(it can make mistakes and cannot count small details reliably):\n")
-                .append(it.take(1200))
+            sys.append("\n\nThe student shared an image. An image reader produced these notes ")
+                .append("(a description of the picture and any text it could read; it can make mistakes):\n")
+                .append(it.take(1500))
         }
         val turns = synchronized(history) { history.toList() }
         var budget = 5000 - sys.length - userMsg.length
@@ -281,10 +301,10 @@ class ModelManager(private val context: Context) {
 
     private suspend fun ensureLoaded(type: ModelType) {
         val loaded = when (type) {
-            ModelType.TEXT -> textCtx
-            ModelType.VISION -> visionCtx
-            ModelType.SPEECH -> speechCtx
-        } != 0L
+            ModelType.TEXT -> textCtx != 0L
+            ModelType.VISION -> florence != null
+            ModelType.SPEECH -> speechCtx != 0L
+        }
         if (loaded) return
         val def = ModelDefinition.BUILTINS.first { it.type == type }
         if (!isDownloaded(def)) error("${def.displayName} is not downloaded. Open Models (⚙️) and download it.")
@@ -308,15 +328,8 @@ class ModelManager(private val context: Context) {
             streamAnswer(prompt, prompt, onToken)
         }
 
-    /** Removes the repeated lines small vision models sometimes produce. */
-    private fun cleanSeen(raw: String): String {
-        val unique = LinkedHashSet<String>()
-        raw.lines().map { it.trim() }.filter { it.isNotBlank() }.forEach { unique.add(it) }
-        return unique.joinToString("\n").take(1200)
-    }
-
     /**
-     * Pipeline: LFM2.5-VL looks at the image (onSeen gets what it saw),
+     * Pipeline: Florence-2 reads the image (onSeen gets its notes),
      * then StudyMate (Qwen3) explains it like a teacher and streams the answer.
      */
     suspend fun analyzeImageStream(
@@ -326,21 +339,14 @@ class ModelManager(private val context: Context) {
         onToken: (String) -> Unit
     ): String = withContext(Dispatchers.Default) {
         stopRequested = false
-        error(FlorenceEngine.inspect(context))  // TEMP step 1: show Florence names in chat
         ensureLoaded(ModelType.VISION)
-        val visionPrompt = if (question.isBlank()) {
-            "Describe this image factually in 4 to 6 sentences. " +
-                "If it contains text, numbers, equations or a book page, read them exactly."
-        } else {
-            "Look at this image and answer using only what is visible. " +
-                "If it contains text, numbers or equations, read them exactly.\nQuestion: $question"
-        }
-        val raw = NativeBridge.describeImage(visionCtx, imagePath, visionPrompt)
-        unload(ModelType.VISION) // free RAM before loading Qwen3
-        val seen = cleanSeen(raw)
-        if (seen.isBlank()) error("The vision model returned nothing.")
-        imageContext = seen
-        onSeen(seen)
+        val engine = florence ?: error("The image reader is not loaded.")
+        val notes = engine.analyze(imagePath) { stopRequested }.take(1500)
+        unload(ModelType.VISION) // free RAM before the teacher model answers
+        if (stopRequested) return@withContext ""
+        if (notes.isBlank()) error("The image reader returned nothing.")
+        imageContext = notes
+        onSeen(notes)
         ensureLoaded(ModelType.TEXT)
         val ask = if (question.isBlank()) "Please explain what is in my image like a teacher." else question
         streamAnswer(
