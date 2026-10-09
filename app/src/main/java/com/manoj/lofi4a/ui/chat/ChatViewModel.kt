@@ -16,6 +16,8 @@ private const val WELCOME =
     "Hi, I'm StudyMate. I can explain lessons, solve maths step by step, and read pages from your book. " +
         "What would you like to work on?"
 
+private const val READING = "Reading the image…"
+
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val modelManager = (app as LoFiApp).modelManager
 
@@ -57,13 +59,23 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     /** Shows an error in the current assistant bubble, keeping any text already streamed. */
     private fun failLast(msg: String) {
         _messages.update { list ->
-            if (list.isEmpty() || list.last().isUser) list + ChatMessage("Something went wrong: $msg", false)
+            val last = list.lastOrNull()
+            if (last == null || last.isUser) list + ChatMessage("Something went wrong: $msg", false)
             else {
-                val last = list.last()
-                val t = if (last.text.isBlank()) "Something went wrong: $msg"
+                val t = if (last.text.isBlank() || last.text == READING) "Something went wrong: $msg"
                 else last.text + "\n\nSomething went wrong: $msg"
                 list.dropLast(1) + last.copy(text = t)
             }
+        }
+    }
+
+    /** If the assistant bubble is still empty (the user pressed Stop early), mark it as stopped. */
+    private fun markStoppedIfEmpty() {
+        _messages.update { list ->
+            val last = list.lastOrNull()
+            if (last != null && !last.isUser && (last.text.isBlank() || last.text == READING)) {
+                list.dropLast(1) + last.copy(text = "Stopped.")
+            } else list
         }
     }
 
@@ -74,7 +86,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         _messages.value = listOf(ChatMessage(WELCOME, false))
     }
 
-    /** Stops the answer that is currently streaming. */
+    /** Stops whatever is running (reading the image or writing the answer). */
     fun stop() {
         modelManager.requestStop()
     }
@@ -90,16 +102,17 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 failLast(e.message ?: "unknown error")
             } finally {
+                markStoppedIfEmpty()
                 _generating.value = false
             }
         }
     }
 
-    /** Vision model reads the image, then StudyMate answers using those notes. */
+    /** Florence reads the image, then StudyMate answers using those notes. */
     fun describeImage(imagePath: String, question: String = "") {
         if (_generating.value) return
         addMessage(if (question.isBlank()) "Image attached" else question, isUser = true)
-        addMessage("", isUser = false)
+        addMessage(READING, isUser = false)
         _generating.value = true
         viewModelScope.launch(Dispatchers.Default) {
             try {
@@ -117,6 +130,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 failLast(e.message ?: "unknown error")
             } finally {
+                markStoppedIfEmpty()
                 _generating.value = false
             }
         }
