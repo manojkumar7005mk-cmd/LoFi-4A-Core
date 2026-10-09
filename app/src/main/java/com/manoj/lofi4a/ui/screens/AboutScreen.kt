@@ -1,5 +1,6 @@
 package com.manoj.lofi4a.ui.screens
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -7,50 +8,28 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-
-private data class LicenseEntry(val name: String, val license: String, val note: String)
-
-private val backendModels = listOf(
-    Triple("Text", "Gemma 3 1B Instruct (GGUF Q4_K_M)", "Gemma Terms of Use"),
-    Triple("Vision", "LFM2.5-VL 450M (GGUF + mmproj)", "LFM Open License"),
-    Triple("Speech", "Whisper Base (GGUF)", "MIT")
-)
-
-private val tech = listOf(
-    "llama.cpp + mtmd — text & vision inference (MIT)",
-    "whisper.cpp — speech recognition (MIT)",
-    "Android Jetpack Compose — UI (Apache 2.0)",
-    "Kotlin — programming language (Apache 2.0)"
-)
-
-private val licenses = listOf(
-    LicenseEntry("llama.cpp", "MIT", "https://github.com/ggml-org/llama.cpp"),
-    LicenseEntry("whisper.cpp", "MIT", "https://github.com/ggml-org/whisper.cpp"),
-    LicenseEntry("Qwen3", "Apache 2.0", "https://huggingface.co/Qwen/Qwen3-1.7B"),
-    LicenseEntry("LFM2.5-VL", "LFM Open License", "https://www.liquid.ai/"),
-    LicenseEntry("OpenAI Whisper", "MIT", "https://github.com/openai/whisper"),
-    LicenseEntry("ggml", "MIT", "https://github.com/ggml-org/ggml")
-)
+import com.manoj.lofi4a.R
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AboutScreen(onBack: () -> Unit) {
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text("About StudyMate AI") },
+                title = { Text("About", fontWeight = FontWeight.SemiBold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    containerColor = MaterialTheme.colorScheme.background
                 )
             )
         }
@@ -60,61 +39,53 @@ fun AboutScreen(onBack: () -> Unit) {
                 .padding(padding)
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text("🎓 StudyMate AI", style = MaterialTheme.typography.headlineMedium)
-            Text(
-                "Your friendly offline study buddy. It explains lessons, solves sums step by step, " +
-                    "and reads pages from your books, all on your phone.",
-                style = MaterialTheme.typography.bodyMedium
-            )
-            Text(
-                "Designed and developed by Manoj Kumar, a student.",
-                style = MaterialTheme.typography.bodyMedium
-            )
-
-            HorizontalDivider()
-
-            Text("Backend Models", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            backendModels.forEach { (role, model, lic) ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Image(
+                    painter = painterResource(R.drawable.studymate_logo),
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp)
+                )
+                Spacer(Modifier.width(14.dp))
                 Column {
-                    Text(role, style = MaterialTheme.typography.labelLarge)
-                    Text(model, style = MaterialTheme.typography.bodyMedium)
+                    Text("StudyMate", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     Text(
-                        "License: $lic",
-                        style = MaterialTheme.typography.bodySmall,
+                        "Your offline study buddy",
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
 
-            HorizontalDivider()
-
-            Text("Technologies", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            tech.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium) }
-
-            HorizontalDivider()
-
             Text(
-                "Third-Party Licenses & Attributions",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+                "StudyMate explains lessons, solves maths step by step, and reads pages from your books. " +
+                    "Everything runs on your phone, so your questions and photos never leave the device.",
+                style = MaterialTheme.typography.bodyMedium
             )
-            licenses.forEach { l ->
-                Column {
-                    Text(l.name, style = MaterialTheme.typography.labelLarge)
-                    Text(
-                        "${l.license} — ${l.note}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
 
-            Spacer(Modifier.height(16.dp))
+            HorizontalDivider()
+
+            Text("How it works", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text("• Qwen3 1.7B writes the answers and teaches.", style = MaterialTheme.typography.bodyMedium)
             Text(
-                "All models run fully on-device. No data leaves your phone.",
+                "• Florence-2 Base reads photos: it describes the picture and reads the text on it, " +
+                    "then passes those notes to Qwen3.",
+                style = MaterialTheme.typography.bodyMedium
+            )
+
+            HorizontalDivider()
+
+            Text("Open-source credits", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text("Qwen3 (Alibaba Cloud) — Apache 2.0", style = MaterialTheme.typography.bodySmall)
+            Text("Florence-2 (Microsoft) — MIT", style = MaterialTheme.typography.bodySmall)
+            Text("llama.cpp and ggml — MIT", style = MaterialTheme.typography.bodySmall)
+            Text("ONNX Runtime (Microsoft) — MIT", style = MaterialTheme.typography.bodySmall)
+
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "A student project by Manoj Kumar.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
