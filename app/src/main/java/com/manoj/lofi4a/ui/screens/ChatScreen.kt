@@ -1,4 +1,4 @@
- package com.manoj.lofi4a.ui.screens
+package com.manoj.lofi4a.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -24,7 +24,6 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -301,7 +300,11 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
                                     contentColor = MaterialTheme.colorScheme.onError
                                 )
                             ) {
-                                Icon(Icons.Default.Stop, contentDescription = "Stop")
+                                Text(
+                                    "■",
+                                    color = MaterialTheme.colorScheme.onError,
+                                    style = MaterialTheme.typography.titleMedium
+                                )
                             }
                         } else {
                             FilledIconButton(
