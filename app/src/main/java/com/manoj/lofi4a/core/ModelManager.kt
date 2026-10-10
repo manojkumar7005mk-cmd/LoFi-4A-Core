@@ -267,14 +267,14 @@ class ModelManager(private val context: Context) {
     }
 
     /**
-     * Builds a Qwen3 (ChatML) prompt: system persona (+ optional image notes) + recent turns + new message.
+     * Builds a Qwen3 (ChatML) prompt: system persona (+ notes of an earlier image) + recent turns + new message.
      * Qwen3 "thinking" is switched off by pre-filling an empty <think></think> block.
      */
     private fun buildPrompt(userMsg: String): String {
         val sys = StringBuilder(systemPrompt)
         imageContext?.let {
-            sys.append("\n\nThe student shared an image. An image reader produced these notes ")
-                .append("(a description of the picture and any text it could read; it can make mistakes):\n")
+            sys.append("\n\nEarlier the student shared a photo. An image reader produced these notes ")
+                .append("(they can contain mistakes):\n")
                 .append(it.take(1500))
         }
         val turns = synchronized(history) { history.toList() }
@@ -345,15 +345,20 @@ class ModelManager(private val context: Context) {
         unload(ModelType.VISION) // free RAM before the teacher model answers
         if (stopRequested) return@withContext ""
         if (notes.isBlank()) error("The image reader returned nothing.")
-        imageContext = notes
         onSeen(notes)
         ensureLoaded(ModelType.TEXT)
-        val ask = if (question.isBlank()) "Please explain what is in my image like a teacher." else question
-        streamAnswer(
-            "$ask\n(Use the image notes above. If they don't show the answer, say honestly what you can't tell.)",
-            "[shared an image] $ask",
-            onToken
-        )
+        val ask = if (question.isBlank()) "Explain what is in this image." else question
+        val msg = "The student attached a photo. You cannot see the photo yourself, " +
+            "but an image reader looked at it and produced these notes:\n\n" +
+            notes + "\n\n" +
+            "Student's request: " + ask + "\n\n" +
+            "Use the notes to help. The notes can contain mistakes. " +
+            "If the notes are not enough to answer, say clearly what you could not read and ask the student " +
+            "to type the question or retake the photo straight and closer. " +
+            "Never say that you cannot see an image."
+        val reply = streamAnswer(msg, "[shared a photo] $ask", onToken)
+        imageContext = notes // remembered for follow-up questions
+        reply
     }
 
     suspend fun transcribe(wavPath: String): String = withContext(Dispatchers.Default) {
