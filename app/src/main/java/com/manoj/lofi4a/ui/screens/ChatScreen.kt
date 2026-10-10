@@ -477,37 +477,4 @@ private fun renderMarkdown(text: String): AnnotatedString = buildAnnotatedString
     lines.forEachIndexed { index, raw ->
         var line = raw.replace(Regex("^\\s*[*-]\\s+"), "• ")
         val heading = line.trimStart().startsWith("#")
-        if (heading) line = line.trimStart().trimStart('#').trim()
-
-        val parts = line.split("**")
-        parts.forEachIndexed { i, part ->
-            if (heading || i % 2 == 1) {
-                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(part) }
-            } else {
-                append(part)
-            }
-        }
-        if (index < lines.lastIndex) append("\n")
-    }
-}
-
-/** Turns simple LaTeX into readable text: $$ and $ removed, common symbols converted. */
-private fun latexToText(input: String): String {
-    var t = input.replace("$$", "").replace("$", "")
-    val symbols = mapOf(
-        "\\infty" to "∞", "\\sum" to "Σ", "\\prod" to "Π", "\\int" to "∫",
-        "\\zeta" to "ζ", "\\xi" to "ξ", "\\dot" to "", "\\pi" to "π", "\\alpha" to "α",
-        "\\beta" to "β", "\\gamma" to "γ", "\\delta" to "δ", "\\theta" to "θ", "\\lambda" to "λ",
-        "\\mu" to "μ", "\\sigma" to "σ", "\\omega" to "ω", "\\leq" to "≤", "\\geq" to "≥",
-        "\\neq" to "≠", "\\pm" to "±", "\\times" to "×", "\\cdot" to "·", "\\ldots" to "…",
-        "\\dots" to "…", "\\to" to "→", "\\rightarrow" to "→", "\\approx" to "≈"
-    )
-    for ((k, v) in symbols) t = t.replace(Regex(k + "(?![a-zA-Z])"), v)
-    t = t.replace(Regex("\\frac\\{([^{}]*)\\}\\{([^{}]*)\\}"), "($1)/($2)")
-    t = t.replace(Regex("\\\\(sqrt)\\{([^{}]*)\\}"), "√($2)")
-    t = t.replace(Regex("\\\\\\{|\\\\\\}"), "")
-    t = t.replace(Regex("\\^\\{([^{}]*)\\}"), "^($1)")
-    t = t.replace(Regex("_\\{([^{}]*)\\}"), "_($1)")
-    t = t.replace(Regex("\\\\(text|mathrm|mathbf)\\{([^{}]*)\\}"), "$2")
-    return t
-}
+ 
