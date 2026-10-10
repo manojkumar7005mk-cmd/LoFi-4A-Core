@@ -15,6 +15,7 @@
 
 namespace {
 constexpr int N_CTX = 4096;
+constexpr int N_CTX_VISION = 8192; // OCR pages need room for many image tokens
 constexpr int N_BATCH = 512;
 constexpr int N_THREADS = 4;
 
@@ -94,9 +95,9 @@ llama_model* load_model(const std::string& path) {
     return llama_model_load_from_file(path.c_str(), mp);
 }
 
-llama_context* new_context(llama_model* model) {
+llama_context* new_context(llama_model* model, int n_ctx = N_CTX) {
     llama_context_params cp = llama_context_default_params();
-    cp.n_ctx = N_CTX;
+    cp.n_ctx = n_ctx;
     cp.n_batch = N_BATCH;
     cp.n_ubatch = N_BATCH;
     cp.n_threads = N_THREADS;
@@ -241,7 +242,7 @@ Java_com_manoj_lofi4a_core_NativeBridge_unloadTextModel(JNIEnv*, jobject, jlong 
     delete c;
 }
 
-// ---------------- Vision (LFM2.5-VL via mtmd) ----------------
+// ---------------- Vision (LightOnOCR-2 via mtmd) ----------------
 
 JNIEXPORT jlong JNICALL
 Java_com_manoj_lofi4a_core_NativeBridge_loadVisionModel(JNIEnv* env, jobject, jstring modelPath, jstring mmprojPath) {
@@ -249,7 +250,7 @@ Java_com_manoj_lofi4a_core_NativeBridge_loadVisionModel(JNIEnv* env, jobject, js
     LOGI("loadVisionModel: %s + %s", m.c_str(), mm.c_str());
     llama_model* model = load_model(m);
     if (!model) { fail(env, "Could not load vision model."); return 0; }
-    llama_context* lctx = new_context(model);
+    llama_context* lctx = new_context(model, N_CTX_VISION);
     if (!lctx) { llama_model_free(model); fail(env, "Could not create vision context."); return 0; }
     mtmd_context_params mp = mtmd_context_params_default();
     mp.use_gpu = false;
@@ -320,7 +321,7 @@ Java_com_manoj_lofi4a_core_NativeBridge_describeImage(JNIEnv* env, jobject, jlon
 
     const llama_vocab* vocab = llama_model_get_vocab(c->model);
     // low temperature = factual, fewer made-up details
-     return to_jstring(env, sample_loop(c->lctx, vocab, 200, nullptr, 0.2f));
+     return to_jstring(env, sample_loop(c->lctx, vocab, 1500, nullptr, 0.1f));
 }
 
 JNIEXPORT void JNICALL

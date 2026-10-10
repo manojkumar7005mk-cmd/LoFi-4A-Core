@@ -21,7 +21,7 @@ data class ModelDefinition(
             ModelDefinition(
                 id = "qwen3-1.7b-q4km",
                 type = ModelType.TEXT,
-                displayName = "Qwen3 1.7B",
+                displayName = "StudyMate Distilled Qwen",
                 role = "Teacher · answers and explains",
                 sizeLabel = "~1.1 GB",
                 licenseName = "Apache 2.0",
@@ -29,15 +29,16 @@ data class ModelDefinition(
                 downloadUrl = "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf"
             ),
             ModelDefinition(
-                id = "florence-2-base",
+                id = "lighton-ocr-2-1b",
                 type = ModelType.VISION,
-                displayName = "Florence-2 Base",
-                role = "Image reader · describes photos and reads text",
-                sizeLabel = "~1.1 GB",
-                licenseName = "MIT",
-                fileName = FlorenceEngine.FILES.first().first,
-                downloadUrl = FlorenceEngine.FILES.first().second,
-                extraFiles = FlorenceEngine.FILES.drop(1)
+                displayName = "LightOnOCR-2 1B",
+                role = "Image reader · reads text, maths and notes from photos",
+                sizeLabel = "~1.2 GB",
+                licenseName = "Apache 2.0",
+                fileName = "LightOnOCR-2-1B-Q4_K_M.gguf",
+                downloadUrl = "https://huggingface.co/noctrex/LightOnOCR-2-1B-GGUF/resolve/main/LightOnOCR-2-1B-Q4_K_M.gguf",
+                mmprojFileName = "LightOnOCR-2-1B-mmproj-F16.gguf",
+                mmprojUrl = "https://huggingface.co/noctrex/LightOnOCR-2-1B-GGUF/resolve/main/mmproj-F16.gguf"
             ),
             ModelDefinition(
                 id = "whisper-base",

@@ -108,7 +108,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Florence reads the image, then StudyMate answers using those notes. */
+    /** LightOnOCR reads the image, then StudyMate answers using those notes. */
     fun describeImage(imagePath: String, question: String = "") {
         if (_generating.value) return
         addMessage(if (question.isBlank()) "Image attached" else question, isUser = true)

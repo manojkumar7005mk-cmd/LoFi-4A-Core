@@ -187,7 +187,7 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
     }
 
     val statusLine = buildString {
-        append(if (textLoaded) "Qwen3 1.7B · Ready" else "Qwen3 1.7B · Not loaded")
+        append(if (textLoaded) "StudyMate Distilled Qwen · Ready" else "StudyMate Distilled Qwen · Not loaded")
         if (offline) append(" · Offline")
     }
 
@@ -470,6 +470,7 @@ private fun MessageRow(msg: ChatMessage, thinking: Boolean) {
         }
     }
 }
+
 /** Turns simple markdown (**bold**, bullets, # headings) into styled text. */
 private fun renderMarkdown(text: String): AnnotatedString = buildAnnotatedString {
     val lines = text.split("\n")

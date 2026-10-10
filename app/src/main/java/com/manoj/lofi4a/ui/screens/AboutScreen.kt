@@ -68,10 +68,10 @@ fun AboutScreen(onBack: () -> Unit) {
             HorizontalDivider()
 
             Text("How it works", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Text("• Qwen3 1.7B writes the answers and teaches.", style = MaterialTheme.typography.bodyMedium)
+            Text("• StudyMate Distilled Qwen writes the answers and teaches.", style = MaterialTheme.typography.bodyMedium)
             Text(
-                "• Florence-2 Base reads photos: it describes the picture and reads the text on it, " +
-                    "then passes those notes to Qwen3.",
+                "• LightOnOCR-2 reads photos: it picks out the text, maths and notes on the page, " +
+                    "then passes those notes to StudyMate.",
                 style = MaterialTheme.typography.bodyMedium
             )
 
@@ -79,7 +79,7 @@ fun AboutScreen(onBack: () -> Unit) {
 
             Text("Open-source credits", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text("Qwen3 (Alibaba Cloud) — Apache 2.0", style = MaterialTheme.typography.bodySmall)
-            Text("Florence-2 (Microsoft) — MIT", style = MaterialTheme.typography.bodySmall)
+            Text("LightOnOCR-2 (LightOn) — Apache 2.0", style = MaterialTheme.typography.bodySmall)
             Text("llama.cpp and ggml — MIT", style = MaterialTheme.typography.bodySmall)
             Text("ONNX Runtime (Microsoft) — MIT", style = MaterialTheme.typography.bodySmall)
 

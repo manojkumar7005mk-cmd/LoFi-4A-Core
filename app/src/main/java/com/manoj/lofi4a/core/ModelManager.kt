@@ -32,7 +32,7 @@ class ModelManager(private val context: Context) {
 
     // Loaded engines; 0 / null = unloaded
     private var textCtx: Long = 0
-    private var florence: FlorenceEngine? = null
+    private var visionCtx: Long = 0
     private var speechCtx: Long = 0
 
     @Volatile private var stopRequested = false
@@ -46,7 +46,7 @@ class ModelManager(private val context: Context) {
         monitorConnectivity()
     }
 
-    /** Frees space from models earlier versions used, and reuses Florence files already downloaded. */
+    /** Frees space from models earlier versions used. */
     private fun cleanupOldFiles() {
         listOf(
             "gemma-3-1b-it-Q4_K_M.gguf",
@@ -54,16 +54,9 @@ class ModelManager(private val context: Context) {
             "mmproj-LFM2.5-VL-450m-Q8_0.gguf"
         ).forEach { File(modelsDir, it).delete() }
 
-        val oldDir = File(context.filesDir, "florence")
-        if (oldDir.exists()) {
-            val newDir = File(modelsDir, "florence").apply { mkdirs() }
-            listOf("vision_encoder.onnx", "embed_tokens.onnx", "encoder_model.onnx").forEach { name ->
-                val from = File(oldDir, name)
-                val to = File(newDir, name)
-                if (from.exists() && !to.exists()) from.renameTo(to)
-            }
-            oldDir.deleteRecursively()
-        }
+        // Florence-2 is no longer used: free its space
+        File(context.filesDir, "florence").deleteRecursively()
+        File(modelsDir, "florence").deleteRecursively()
     }
 
     fun modelFile(def: ModelDefinition): File = File(modelsDir, def.fileName)
@@ -93,7 +86,7 @@ class ModelManager(private val context: Context) {
     private fun stateFor(type: ModelType): ModelState {
         val loaded = when (type) {
             ModelType.TEXT -> textCtx != 0L
-            ModelType.VISION -> florence != null
+            ModelType.VISION -> visionCtx != 0L
             ModelType.SPEECH -> speechCtx != 0L
         }
         if (loaded) return ModelState.LOADED
@@ -198,7 +191,10 @@ class ModelManager(private val context: Context) {
                     }
                     ModelType.VISION -> {
                         unloadLocked(ModelType.VISION)
-                        florence = FlorenceEngine(File(modelsDir, "florence"))
+                        visionCtx = NativeBridge.loadVisionModel(
+                            modelFile(def).absolutePath,
+                            mmprojFile(def)!!.absolutePath
+                        )
                     }
                     ModelType.SPEECH -> {
                         unloadLocked(ModelType.SPEECH)
@@ -225,7 +221,7 @@ class ModelManager(private val context: Context) {
     private fun unloadLocked(type: ModelType) {
         when (type) {
             ModelType.TEXT -> { if (textCtx != 0L) NativeBridge.unloadTextModel(textCtx); textCtx = 0 }
-            ModelType.VISION -> { florence?.close(); florence = null }
+            ModelType.VISION -> { if (visionCtx != 0L) NativeBridge.unloadVisionModel(visionCtx); visionCtx = 0 }
             ModelType.SPEECH -> { if (speechCtx != 0L) NativeBridge.unloadSpeechModel(speechCtx); speechCtx = 0 }
         }
     }
@@ -235,8 +231,7 @@ class ModelManager(private val context: Context) {
         scope.launch {
             synchronized(loadLock) {
                 NativeBridge.freeAll()
-                florence?.close()
-                textCtx = 0; florence = null; speechCtx = 0
+                textCtx = 0; visionCtx = 0; speechCtx = 0
                 refreshStatuses()
             }
         }
@@ -275,7 +270,7 @@ class ModelManager(private val context: Context) {
         imageContext?.let {
             sys.append("\n\nEarlier the student shared a photo. An image reader produced these notes ")
                 .append("(they can contain mistakes):\n")
-                .append(it.take(1500))
+                .append(it.take(3000))
         }
         val turns = synchronized(history) { history.toList() }
         var budget = 5000 - sys.length - userMsg.length
@@ -302,7 +297,7 @@ class ModelManager(private val context: Context) {
     private suspend fun ensureLoaded(type: ModelType) {
         val loaded = when (type) {
             ModelType.TEXT -> textCtx != 0L
-            ModelType.VISION -> florence != null
+            ModelType.VISION -> visionCtx != 0L
             ModelType.SPEECH -> speechCtx != 0L
         }
         if (loaded) return
@@ -329,7 +324,7 @@ class ModelManager(private val context: Context) {
         }
 
     /**
-     * Pipeline: Florence-2 reads the image (onSeen gets its notes),
+     * Pipeline: LightOnOCR-2 reads the image (onSeen gets its notes),
      * then StudyMate (Qwen3) explains it like a teacher and streams the answer.
      */
     suspend fun analyzeImageStream(
@@ -340,8 +335,9 @@ class ModelManager(private val context: Context) {
     ): String = withContext(Dispatchers.Default) {
         stopRequested = false
         ensureLoaded(ModelType.VISION)
-        val engine = florence ?: error("The image reader is not loaded.")
-        val notes = engine.analyze(imagePath) { stopRequested }.take(1500)
+        if (visionCtx == 0L) error("The image reader is not loaded.")
+        // LightOnOCR is an OCR model: it reads the page when given the image alone (empty prompt)
+        val notes = NativeBridge.describeImage(visionCtx, imagePath, "").trim().take(3000)
         unload(ModelType.VISION) // free RAM before the teacher model answers
         if (stopRequested) return@withContext ""
         if (notes.isBlank()) error("The image reader returned nothing.")
