@@ -337,7 +337,7 @@ class ModelManager(private val context: Context) {
         ensureLoaded(ModelType.VISION)
         if (visionCtx == 0L) error("The image reader is not loaded.")
         // LightOnOCR is an OCR model: it reads the page when given the image alone (empty prompt)
-        val notes = NativeBridge.describeImage(visionCtx, imagePath, "").trim().take(3000)
+        val notes = NativeBridge.describeImage(visionCtx, imagePath, "").trim().take(1500)
         unload(ModelType.VISION) // free RAM before the teacher model answers
         if (stopRequested) return@withContext ""
         if (notes.isBlank()) error("The image reader returned nothing.")
@@ -351,7 +351,9 @@ class ModelManager(private val context: Context) {
             "Use the notes to help. The notes can contain mistakes. " +
             "If the notes are not enough to answer, say clearly what you could not read and ask the student " +
             "to type the question or retake the photo straight and closer. " +
-            "Never say that you cannot see an image."
+            "Never say that you cannot see an image. " +
+            "Answer in under 120 words in plain text. Write maths in plain words or simple symbols like x^2, 1/n, sum from n=1 to infinity. " +
+            "Do not use LaTeX, do not use dollar signs, and do not write the notes back to the student."
         val reply = streamAnswer(msg, "[shared a photo] $ask", onToken)
         imageContext = notes // remembered for follow-up questions
         reply

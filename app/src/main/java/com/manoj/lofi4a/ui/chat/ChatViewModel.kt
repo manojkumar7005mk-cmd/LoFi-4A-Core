@@ -118,13 +118,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 modelManager.analyzeImageStream(
                     imagePath, question,
-                    onSeen = { seen ->
-                        _messages.update { list ->
-                            list.dropLast(1) +
-                                ChatMessage("Image notes:\n$seen", false) +
-                                ChatMessage("", false)
-                        }
-                    },
+                    onSeen = { _ -> }, // notes stay internal; the student sees only the answer
                     onToken = { appendToLast(it) }
                 )
             } catch (e: Exception) {

@@ -321,7 +321,7 @@ Java_com_manoj_lofi4a_core_NativeBridge_describeImage(JNIEnv* env, jobject, jlon
 
     const llama_vocab* vocab = llama_model_get_vocab(c->model);
     // low temperature = factual, fewer made-up details
-     return to_jstring(env, sample_loop(c->lctx, vocab, 1500, nullptr, 0.1f));
+     return to_jstring(env, sample_loop(c->lctx, vocab, 500, nullptr, 0.1f));
 }
 
 JNIEXPORT void JNICALL
