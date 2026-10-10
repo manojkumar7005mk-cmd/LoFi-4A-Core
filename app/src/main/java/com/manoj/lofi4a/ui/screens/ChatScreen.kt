@@ -1,9 +1,13 @@
 package com.manoj.lofi4a.ui.screens
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.media.ExifInterface
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -52,6 +56,37 @@ import com.manoj.lofi4a.ui.Routes
 import com.manoj.lofi4a.ui.chat.ChatMessage
 import com.manoj.lofi4a.ui.chat.ChatViewModel
 import java.io.File
+
+private fun rotateBitmap(src: Bitmap, degrees: Float): Bitmap {
+    if (degrees == 0f) return src
+    val m = Matrix()
+    m.postRotate(degrees)
+    return Bitmap.createBitmap(src, 0, 0, src.width, src.height, m, true)
+}
+
+private fun makeThumb(src: Bitmap): Bitmap {
+    val scale = 200f / maxOf(src.width, src.height)
+    return Bitmap.createScaledBitmap(
+        src,
+        (src.width * scale).toInt().coerceAtLeast(1),
+        (src.height * scale).toInt().coerceAtLeast(1),
+        true
+    )
+}
+
+/** Reads the rotation the camera stored in the photo, so sideways photos are turned upright. */
+private fun exifDegrees(context: Context, uri: Uri): Float = try {
+    context.contentResolver.openInputStream(uri)?.use { s ->
+        when (ExifInterface(s).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+            ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+            ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+            else -> 0f
+        }
+    } ?: 0f
+} catch (e: Exception) {
+    0f
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -102,19 +137,30 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
                 var sample = 1
                 while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 1536) sample *= 2
                 val opts = BitmapFactory.Options().apply { inSampleSize = sample }
-                val bmp = context.contentResolver.openInputStream(uri)?.use {
+                val decoded = context.contentResolver.openInputStream(uri)?.use {
                     BitmapFactory.decodeStream(it, null, opts)
                 }
-                if (bmp != null) {
-                    f.outputStream().use { o -> bmp.compress(Bitmap.CompressFormat.JPEG, 90, o) }
-                    val scale = 200f / maxOf(bmp.width, bmp.height)
-                    pendingThumb = Bitmap.createScaledBitmap(
-                        bmp,
-                        (bmp.width * scale).toInt().coerceAtLeast(1),
-                        (bmp.height * scale).toInt().coerceAtLeast(1),
-                        true
-                    )
+                if (decoded != null) {
+                    val upright = rotateBitmap(decoded, exifDegrees(context, uri))
+                    f.outputStream().use { o -> upright.compress(Bitmap.CompressFormat.JPEG, 90, o) }
+                    pendingThumb = makeThumb(upright)
                     pendingImage = f
+                }
+            } catch (e: Exception) {
+            }
+        }
+    }
+
+    // Turns the waiting photo 90 degrees (for photos that are still sideways).
+    val rotatePending: () -> Unit = {
+        val file = pendingImage
+        if (file != null) {
+            try {
+                val b = BitmapFactory.decodeFile(file.absolutePath)
+                if (b != null) {
+                    val r = rotateBitmap(b, 90f)
+                    file.outputStream().use { o -> r.compress(Bitmap.CompressFormat.JPEG, 90, o) }
+                    pendingThumb = makeThumb(r)
                 }
             } catch (e: Exception) {
             }
@@ -254,12 +300,20 @@ fun ChatScreen(onNavigate: (String) -> Unit, vm: ChatViewModel = viewModel()) {
                                 modifier = Modifier.size(64.dp).clip(RoundedCornerShape(12.dp))
                             )
                             Spacer(Modifier.width(12.dp))
-                            Text(
-                                "Photo attached",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.weight(1f)
-                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Photo attached",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                Text(
+                                    "Sideways? Tap rotate.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            IconButton(onClick = rotatePending) {
+                                Icon(Icons.Default.Refresh, contentDescription = "Rotate photo")
+                            }
                             IconButton(onClick = {
                                 pendingImage = null
                                 pendingThumb = null
@@ -423,14 +477,4 @@ private fun renderMarkdown(text: String): AnnotatedString = buildAnnotatedString
     lines.forEachIndexed { index, raw ->
         var line = raw.replace(Regex("^\\s*[*-]\\s+"), "• ")
         val heading = line.trimStart().startsWith("#")
-        if (heading) line = line.trimStart('#', ' ')
-        var bold = heading
-        line.split("**").forEachIndexed { i, part ->
-            if (i > 0) bold = !bold
-            withStyle(if (bold) SpanStyle(fontWeight = FontWeight.Bold) else SpanStyle()) {
-                append(part)
-            }
-        }
-        if (index < lines.lastIndex) append("\n")
-    }
-}
+        if (heading) line = line.trimStart
