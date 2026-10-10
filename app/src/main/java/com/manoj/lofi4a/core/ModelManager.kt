@@ -191,9 +191,11 @@ class ModelManager(private val context: Context) {
                     }
                     ModelType.VISION -> {
                         unloadLocked(ModelType.VISION)
+                        val mmproj = mmprojFile(def)
+                            ?: error("The image reader's projector file is missing.")
                         visionCtx = NativeBridge.loadVisionModel(
                             modelFile(def).absolutePath,
-                            mmprojFile(def)!!.absolutePath
+                            mmproj.absolutePath
                         )
                     }
                     ModelType.SPEECH -> {
