@@ -477,4 +477,49 @@ private fun renderMarkdown(text: String): AnnotatedString = buildAnnotatedString
     lines.forEachIndexed { index, raw ->
         var line = raw.replace(Regex("^\\s*[*-]\\s+"), "• ")
         val heading = line.trimStart().startsWith("#")
- 
+        if (heading) line = line.trimStart().trimStart('#').trim()
+
+        val parts = line.split("**")
+        parts.forEachIndexed { i, part ->
+            if (heading || i % 2 == 1) {
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(part) }
+            } else {
+                append(part)
+            }
+        }
+        if (index < lines.lastIndex) append("\n")
+    }
+}
+
+/** Turns simple LaTeX into readable text: $$ and $ removed, common symbols converted. */
+private fun latexToText(input: String): String {
+    var t = input.replace("$$", "").replace("$", "")
+    // \dot{x} -> x'   (braces handled first, so the name is still plain text)
+    t = t.replace(Regex(Regex.escape("\\dot") + "\\{([^{}]*)\\}")) { "${it.groupValues[1]}'" }
+    // \frac{a}{b} -> (a)/(b)
+    t = t.replace(Regex(Regex.escape("\\frac") + "\\{([^{}]*)\\}\\{([^{}]*)\\}")) {
+        "(${it.groupValues[1]})/(${it.groupValues[2]})"
+    }
+    // \sqrt{a} -> √(a)
+    t = t.replace(Regex(Regex.escape("\\sqrt") + "\\{([^{}]*)\\}")) { "√(${it.groupValues[1]})" }
+    // \text{...}, \mathrm{...}, \mathbf{...} -> just the text
+    t = t.replace(Regex("\\\\(?:text|mathrm|mathbf)\\{([^{}]*)\\}")) { it.groupValues[1] }
+    // x^{...} -> x^(...)   and   x_{...} -> x_(...)
+    t = t.replace(Regex("\\^\\{([^{}]*)\\}")) { "^(${it.groupValues[1]})" }
+    t = t.replace(Regex("_\\{([^{}]*)\\}")) { "_(${it.groupValues[1]})" }
+    // Symbol names -> characters. Escaped so the backslash is literal.
+    val symbols = mapOf(
+        "\\infty" to "∞", "\\sum" to "Σ", "\\prod" to "Π", "\\int" to "∫",
+        "\\zeta" to "ζ", "\\xi" to "ξ", "\\pi" to "π", "\\alpha" to "α",
+        "\\beta" to "β", "\\gamma" to "γ", "\\delta" to "δ", "\\theta" to "θ", "\\lambda" to "λ",
+        "\\mu" to "μ", "\\sigma" to "σ", "\\omega" to "ω", "\\leq" to "≤", "\\geq" to "≥",
+        "\\neq" to "≠", "\\pm" to "±", "\\times" to "×", "\\cdot" to "·", "\\ldots" to "…",
+        "\\dots" to "…", "\\to" to "→", "\\rightarrow" to "→", "\\approx" to "≈"
+    )
+    for ((k, v) in symbols) {
+        t = t.replace(Regex(Regex.escape(k) + "(?![a-zA-Z])"), v)
+    }
+    // Remove any leftover \{ \} and spacing commands
+    t = t.replace("\\{", "").replace("\\}", "").replace("\\,", " ").replace("\\ ", " ")
+    return t
+}
