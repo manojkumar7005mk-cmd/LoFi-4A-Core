@@ -470,11 +470,22 @@ private fun MessageRow(msg: ChatMessage, thinking: Boolean) {
         }
     }
 }
-
 /** Turns simple markdown (**bold**, bullets, # headings) into styled text. */
 private fun renderMarkdown(text: String): AnnotatedString = buildAnnotatedString {
     val lines = text.split("\n")
     lines.forEachIndexed { index, raw ->
         var line = raw.replace(Regex("^\\s*[*-]\\s+"), "• ")
         val heading = line.trimStart().startsWith("#")
-        if (heading) line = line.trimStart
+        if (heading) line = line.trimStart().trimStart('#').trim()
+
+        val parts = line.split("**")
+        parts.forEachIndexed { i, part ->
+            if (heading || i % 2 == 1) {
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(part) }
+            } else {
+                append(part)
+            }
+        }
+        if (index < lines.lastIndex) append("\n")
+    }
+}
